@@ -39,6 +39,11 @@ fi
 echo "== Arrancando Nginx para desafío ACME =="
 docker compose up -d nginx
 
+echo "== Eliminando certificado dummy (si existe) =="
+rm -rf "$DATA_PATH/conf/live/$DOMAIN" || true
+rm -rf "$DATA_PATH/conf/archive/$DOMAIN" || true
+rm -f "$DATA_PATH/conf/renewal/$DOMAIN.conf" || true
+
 echo "== Solicitando certificado real (Let's Encrypt) =="
 docker compose run --rm --entrypoint certbot certbot certonly \
   --webroot -w /var/www/certbot \
