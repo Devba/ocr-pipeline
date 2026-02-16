@@ -11,6 +11,9 @@ web/data/work/
 
 .env
 .env.*
+!.env.example
+
+deploy/certbot/
 
 .DS_Store
 Thumbs.db

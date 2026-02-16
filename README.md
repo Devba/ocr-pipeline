@@ -61,6 +61,39 @@ bash run_web.sh
 
 Abre en navegador: `http://localhost:8000`
 
+## Deploy en VPS (Docker Compose + HTTPS)
+
+Recomendado para producir `https://manuscritos.live` con Nginx + Let's Encrypt.
+
+Requisitos en el VPS:
+
+- Docker + Docker Compose plugin
+- DNS: `A manuscritos.live` y `A www` apuntando a la IP del VPS
+- Puertos abiertos: 80/443 (y 22 para SSH)
+
+### Pasos
+
+En el VPS:
+
+```bash
+git clone https://github.com/Devba/ocr-pipeline.git
+cd ocr-pipeline
+git checkout feature/infra-docker-compose
+
+cp .env.example .env
+# edita .env y pon LETSENCRYPT_EMAIL y FACE_ANTIBOT_SECRET
+
+chmod +x scripts/init_letsencrypt.sh
+LETSENCRYPT_EMAIL="tu@email" bash scripts/init_letsencrypt.sh
+
+docker compose up -d
+```
+
+Luego:
+
+- App: `https://manuscritos.live`
+- Renovación de certificados: se hace sola por el servicio `certbot`.
+
 ### Notas
 
 - Perfil **Histórico** aplica preprocesado más agresivo para manuscritos antiguos.
