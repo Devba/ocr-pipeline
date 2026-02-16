@@ -1,0 +1,16 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+node_modules/
+web/node_modules/
+
+web/data/uploads/
+web/data/work/
+
+.env
+.env.*
+
+.DS_Store
+Thumbs.db

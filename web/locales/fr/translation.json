@@ -1,0 +1,113 @@
+{
+  "ui": {
+    "pageTitle": "OCR Manuscrits",
+    "heading": "OCR pour manuscrits",
+    "subheading": "Maquette commerciale : résumé gratuit et incomplet. Document complet après paiement.",
+    "imageLabel": "Image (PNG/JPG/TIF)",
+    "profileLabel": "Profil",
+    "profileHistorical": "Historique (recommandé)",
+    "profileFast": "Rapide",
+    "psmLabel": "PSM Tesseract",
+    "psm6": "6 - bloc uniforme",
+    "psm11": "11 - texte dispersé",
+    "psm4": "4 - plusieurs colonnes",
+    "languageLabel": "Langue",
+    "detectedLanguageByIp": "Détecté par IP : {{language}} ({{country}})",
+    "detectedLanguageFallback": "Détection incertaine ({{country}}), utilisation de l'anglais",
+    "preprocessBrowser": "Prétraiter dans le navigateur (bêta)",
+    "faceCheckTitle": "Vérification anti-bot par caméra",
+    "faceCheckActive": "La vérification faciale est active pour les envois.",
+    "faceCheckInactive": "La vérification faciale est inactive par défaut (mode test disponible).",
+    "faceCheckTestButton": "Tester la vérification faciale",
+    "processButton": "Lancer l'OCR",
+    "summaryTitle": "Résumé gratuit (incomplet)",
+    "summaryPlaceholder": "Téléversez et traitez une image pour obtenir le résumé gratuit.",
+    "fullDocumentTitle": "Document complet",
+    "lockedTitle": "Document complet verrouillé",
+    "lockedDescription": "Pour déverrouiller la transcription complète, choisissez un moyen de paiement (simulé)."
+  },
+  "marketing": {
+    "title": "Redonnez vie à des manuscrits jugés morts",
+    "missionTitle": "Notre mission",
+    "missionBody": "Sur manuscritos.live, nous transformons des images de manuscrits anciens en texte utile, lisible et réutilisable pour la recherche et la mémoire.",
+    "revivalTitle": "Du document mort à la voix vivante",
+    "revivalBody": "Beaucoup de manuscrits dorment dans des boîtes et des archives. Nous leur rendons une vie numérique pour qu'ils puissent être étudiés et partagés.",
+    "workflowTitle": "Flux simple, valeur immédiate",
+    "workflowBody": "Téléversez une image, obtenez un résumé gratuit et incomplet, puis déverrouillez la version complète si nécessaire.",
+    "accessTitle": "Accès global",
+    "accessBody": "Conçu pour fonctionner en plusieurs langues afin d'aider différentes communautés à préserver leur patrimoine documentaire."
+  },
+  "faq": {
+    "title": "FAQ",
+    "q1": "Que fait manuscritos.live ?",
+    "a1": "Il transforme des images de manuscrits en texte numérique utile pour la recherche, les archives familiales et la mémoire historique.",
+    "q2": "Que reçois-je gratuitement ?",
+    "a2": "Un résumé incomplet du document pour évaluer rapidement son intérêt avant de déverrouiller la version complète.",
+    "q3": "Comment fonctionne le déverrouillage ?",
+    "a3": "Dans cette maquette, les paiements PayPal et MetaMask sont simulés pour valider l'expérience produit.",
+    "q4": "Quels types d'images fonctionnent le mieux ?",
+    "a4": "Scans ou photos nettes, bonne lumière, peu d'ombres et résolution suffisante pour la lecture."
+  },
+  "errors": {
+    "selectImage": "Sélectionnez une image à traiter.",
+    "unsupportedFormat": "Format non pris en charge. Utilisez PNG, JPG, JPEG, TIF ou TIFF.",
+    "tooManyRequests": "Trop de requêtes en peu de temps. Réessayez dans quelques minutes.",
+    "ocrRateLimit": "Limite OCR atteinte pour cette IP. Veuillez patienter quelques minutes.",
+    "cooldown": "Attendez {{seconds}} secondes avant de lancer un nouvel OCR.",
+    "botBlocked": "Requête bloquée par la protection anti-bot.",
+    "faceCheckInvalid": "La vérification faciale est invalide ou expirée. Vérifiez à nouveau votre visage puis réessayez.",
+    "requestTimeout": "L'opération a pris trop de temps. Veuillez réessayer.",
+    "fileTooLarge": "Fichier trop volumineux. Taille maximale autorisée : {{sizeMB}} Mo.",
+    "prepareMock": "Erreur lors de la préparation de la maquette du document.",
+    "missingPaymentData": "Données manquantes pour simuler le paiement.",
+    "documentNotFound": "Document introuvable pour le déverrouillage.",
+    "invalidRequest": "Requête invalide."
+  },
+  "payment": {
+    "paypalLabel": "PayPal",
+    "metamaskLabel": "MetaMask",
+    "paypalButton": "Payer avec PayPal (simulé)",
+    "metamaskButton": "Payer avec MetaMask (simulé)"
+  },
+  "messages": {
+    "paymentSuccess": "Paiement simulé avec {{method}} effectué. Document complet déverrouillé."
+  },
+  "mock": {
+    "summaryLines": [
+      "Résumé préliminaire (incomplet) :",
+      "- Une lettre manuscrite avec des références administratives est identifiée.",
+      "- Des mentions partielles de dates et de noms propres apparaissent.",
+      "- Le contenu suggère un contexte historique et une valeur documentaire.",
+      "",
+      "Pour voir la transcription complète, déverrouillez le document via paiement."
+    ],
+    "fullDocumentLines": [
+      "Document complet (maquette) :",
+      "\"Dans la ville, le quatorze mai mil neuf cent soixante-deux,",
+      "il est constaté la réception des biens inventoriés",
+      "et l'accord des parties signataires pour l'archivage.\"",
+      "",
+      "Remarque : cette transcription est simulée pour la maquette commerciale."
+    ]
+  },
+  "client": {
+    "unsupportedFormat": "Format non pris en charge. Utilisez PNG, JPG, JPEG, TIF ou TIFF.",
+    "preprocessing": "Prétraitement de l'image dans le navigateur...",
+    "preprocessingReady": "Prétraitement prêt. Envoi au serveur...",
+    "preprocessingError": "Erreur de prétraitement local.",
+    "likelyNoTextWarning": "L'image semble ne contenir aucun texte lisible pour l'OCR.",
+    "likelyNoTextConfirm": "Cela ressemble à une photo sans texte (par exemple un visage). Voulez-vous continuer quand même ?",
+    "likelyPrintedWarning": "L'image semble contenir du texte tapé/numérique, pas manuscrit.",
+    "likelyPrintedConfirm": "Cette image pourrait ne pas être manuscrite. Voulez-vous continuer quand même ?",
+    "faceCheckStarting": "Démarrage de la vérification faciale par caméra...",
+    "faceCheckUnsupported": "Ce navigateur ne prend pas en charge la détection faciale automatique.",
+    "faceCheckNoCamera": "L'accès à la caméra n'est pas disponible sur ce navigateur ou appareil.",
+    "faceCheckNoFace": "Aucun visage détecté par la caméra. Veuillez réessayer.",
+    "faceCheckOk": "Vérification faciale terminée (mode test).",
+    "faceCheckRequired": "Vérification faciale requise avant l'envoi.",
+    "faceCheckChallengeError": "Impossible de générer un jeton de vérification sécurisé.",
+    "faceCheckError": "Impossible de terminer la vérification faciale.",
+    "connectingPayment": "Connexion à {{method}} (simulé)...",
+    "paymentAuthorized": "Paiement sur {{method}} autorisé (simulé)."
+  }
+}

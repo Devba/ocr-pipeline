@@ -1,0 +1,113 @@
+{
+  "ui": {
+    "pageTitle": "手写体 OCR",
+    "heading": "手写文档 OCR",
+    "subheading": "商业原型：免费提供不完整摘要。完整文档需付费后查看。",
+    "imageLabel": "图片（PNG/JPG/TIF）",
+    "profileLabel": "模式",
+    "profileHistorical": "历史文档（推荐）",
+    "profileFast": "快速",
+    "psmLabel": "Tesseract PSM",
+    "psm6": "6 - 统一文本块",
+    "psm11": "11 - 稀疏文本",
+    "psm4": "4 - 多栏",
+    "languageLabel": "语言",
+    "detectedLanguageByIp": "根据 IP 检测：{{language}}（{{country}}）",
+    "detectedLanguageFallback": "检测不确定（{{country}}），使用英语",
+    "preprocessBrowser": "在浏览器中预处理（测试版）",
+    "faceCheckTitle": "摄像头反机器人人脸检测",
+    "faceCheckActive": "提交时已启用人脸检测。",
+    "faceCheckInactive": "人脸检测默认关闭（可进行测试）。",
+    "faceCheckTestButton": "测试人脸检测",
+    "processButton": "执行 OCR",
+    "summaryTitle": "免费摘要（不完整）",
+    "summaryPlaceholder": "上传并处理图片以获取免费摘要。",
+    "fullDocumentTitle": "完整文档",
+    "lockedTitle": "完整文档已锁定",
+    "lockedDescription": "如需解锁完整转写，请选择一种支付方式（模拟）。"
+  },
+  "marketing": {
+    "title": "让“沉睡”的手稿重新发声",
+    "missionTitle": "我们的使命",
+    "missionBody": "在 manuscritos.live，我们将古老手稿图像转化为可读、可用、可复用的文本，用于研究、家族档案与历史记忆。",
+    "revivalTitle": "从“死文档”到“活文本”",
+    "revivalBody": "许多手稿被遗忘在档案和箱柜中。我们的目标是让它们获得数字生命，重新被阅读、研究与分享。",
+    "workflowTitle": "流程简单，价值直达",
+    "workflowBody": "上传图像即可获得免费不完整摘要；需要完整内容时再解锁，快速验证价值。",
+    "accessTitle": "全球可访问",
+    "accessBody": "支持多语言，帮助不同社区在低技术门槛下保护并激活文献遗产。"
+  },
+  "faq": {
+    "title": "常见问题",
+    "q1": "manuscritos.live 是做什么的？",
+    "a1": "它将手稿图片转换为可用的数字文本，服务于研究、家族档案和历史记忆保存。",
+    "q2": "免费能得到什么？",
+    "a2": "可先获得文档的不完整摘要，用于快速判断价值，再决定是否解锁完整内容。",
+    "q3": "解锁如何进行？",
+    "a3": "在此原型中，PayPal/MetaMask 支付为模拟流程，用于验证产品体验。",
+    "q4": "什么图片效果最好？",
+    "a4": "建议使用清晰扫描或对焦良好的照片，光线均匀、阴影少、分辨率足够。"
+  },
+  "errors": {
+    "selectImage": "请选择要处理的图片。",
+    "unsupportedFormat": "不支持的格式。请使用 PNG、JPG、JPEG、TIF 或 TIFF。",
+    "tooManyRequests": "短时间内请求过多，请稍后再试。",
+    "ocrRateLimit": "该 IP 的 OCR 请求已达上限，请稍后再试。",
+    "cooldown": "请等待 {{seconds}} 秒后再执行 OCR。",
+    "botBlocked": "请求已被反机器人保护拦截。",
+    "faceCheckInvalid": "人脸校验无效或已过期。请重新进行人脸校验后再试。",
+    "requestTimeout": "操作耗时过长，请重试。",
+    "fileTooLarge": "文件过大，最大允许：{{sizeMB}} MB。",
+    "prepareMock": "准备文档原型时出错。",
+    "missingPaymentData": "缺少支付模拟所需数据。",
+    "documentNotFound": "未找到可解锁的文档。",
+    "invalidRequest": "无效请求。"
+  },
+  "payment": {
+    "paypalLabel": "PayPal",
+    "metamaskLabel": "MetaMask",
+    "paypalButton": "使用 PayPal 支付（模拟）",
+    "metamaskButton": "使用 MetaMask 支付（模拟）"
+  },
+  "messages": {
+    "paymentSuccess": "已完成 {{method}} 模拟支付。完整文档已解锁。"
+  },
+  "mock": {
+    "summaryLines": [
+      "初步摘要（不完整）：",
+      "- 已识别出一封带有行政参考信息的手写信件。",
+      "- 可见部分日期和专有名词。",
+      "- 内容显示出历史背景及潜在档案价值。",
+      "",
+      "如需查看完整转写，请通过支付解锁文档。"
+    ],
+    "fullDocumentLines": [
+      "完整文档（原型）：",
+      "\"于一九六二年五月十四日，在本镇，",
+      "记录了清单物资的接收情况，",
+      "以及签署各方同意归档保管。\"",
+      "",
+      "说明：该转写为商业原型中的模拟内容。"
+    ]
+  },
+  "client": {
+    "unsupportedFormat": "不支持的格式。请使用 PNG、JPG、JPEG、TIF 或 TIFF。",
+    "preprocessing": "正在浏览器中预处理图片...",
+    "preprocessingReady": "预处理完成，正在发送到服务器...",
+    "preprocessingError": "本地预处理出错。",
+    "likelyNoTextWarning": "该图片似乎不包含可供 OCR 识别的文字。",
+    "likelyNoTextConfirm": "这看起来像一张没有文字的照片（例如人脸）。仍要继续吗？",
+    "likelyPrintedWarning": "该图片看起来更像机器打印/数字文本，而非手写。",
+    "likelyPrintedConfirm": "该图片可能不是手写内容。仍要继续吗？",
+    "faceCheckStarting": "正在启动摄像头人脸检测...",
+    "faceCheckUnsupported": "当前浏览器不支持自动人脸检测。",
+    "faceCheckNoCamera": "当前浏览器或设备无法访问摄像头。",
+    "faceCheckNoFace": "摄像头未检测到人脸，请重试。",
+    "faceCheckOk": "人脸检测完成（测试模式）。",
+    "faceCheckRequired": "提交前需要进行人脸检测。",
+    "faceCheckChallengeError": "无法生成安全校验令牌。",
+    "faceCheckError": "无法完成人脸检测。",
+    "connectingPayment": "正在连接 {{method}}（模拟）...",
+    "paymentAuthorized": "{{method}} 支付已授权（模拟）。"
+  }
+}

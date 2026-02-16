@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="<%= currentLanguage %>" dir="<%= isRtl ? 'rtl' : 'ltr' %>">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= t('ui.pageTitle') %></title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    .navbar { display: flex; align-items: center; justify-content: space-between; border: 1px solid #ddd; border-radius: 10px; padding: 0.7rem 0.9rem; margin-bottom: 1rem; background: #fafafa; }
+    .brand { font-weight: 700; color: #222; }
+    .lang-wrap { display: flex; align-items: center; gap: 0.6rem; }
+    .tooltip { position: relative; display: inline-flex; align-items: center; }
+    .tooltip-btn {
+      border: 1px solid #ccc;
+      background: #fff;
+      border-radius: 999px;
+      width: 22px;
+      height: 22px;
+      cursor: default;
+      font-size: 12px;
+      line-height: 20px;
+      text-align: center;
+      color: #333;
+      padding: 0;
+    }
+    .tooltip-text {
+      position: absolute;
+      top: calc(100% + 8px);
+      inset-inline-end: 0;
+      min-width: 220px;
+      max-width: 320px;
+      background: #111;
+      color: #fff;
+      border-radius: 6px;
+      padding: 0.45rem 0.6rem;
+      font-size: 12px;
+      opacity: 0;
+      transform: translateY(-3px);
+      pointer-events: none;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+      z-index: 20;
+    }
+    .tooltip:hover .tooltip-text,
+    .tooltip:focus-within .tooltip-text {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .flag-badge { font-size: 1.3rem; display: inline-block; animation: floatFlag 1.8s ease-in-out infinite; transform-origin: center; }
+    @keyframes floatFlag {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      50% { transform: translateY(-2px) rotate(-3deg); }
+    }
+    h1 { margin-bottom: 0.2rem; }
+    p { color: #333; }
+    .domain-badge { display: inline-block; font-size: 12px; border: 1px solid #ddd; border-radius: 999px; padding: 0.25rem 0.65rem; background: #fff; color: #444; margin-bottom: 0.6rem; }
+    .marketing { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; background: #fcfcfc; }
+    .marketing h2 { margin-top: 0; margin-bottom: 0.6rem; }
+    .marketing-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+    .marketing-card { border: 1px solid #e7e7e7; border-radius: 8px; padding: 0.75rem; background: #fff; }
+    .marketing-card h3 { margin: 0 0 0.4rem 0; font-size: 15px; }
+    .marketing-card p { margin: 0; font-size: 14px; line-height: 1.35; }
+    .faq { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; background: #fff; }
+    .faq h2 { margin-top: 0; margin-bottom: 0.6rem; }
+    .faq details { border-top: 1px solid #eee; padding-top: 0.6rem; margin-top: 0.6rem; }
+    .faq details:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+    .faq summary { cursor: pointer; font-weight: 600; }
+    .faq p { margin: 0.5rem 0 0 0; font-size: 14px; line-height: 1.4; }
+    @media (max-width: 700px) {
+      .marketing-grid { grid-template-columns: 1fr; }
+    }
+    form { border: 1px solid #ddd; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 0.8rem 0; }
+    .error { background: #fde8e8; color: #b91c1c; border: 1px solid #fca5a5; padding: 0.8rem; border-radius: 8px; }
+    .ok { background: #ecfdf3; color: #065f46; border: 1px solid #6ee7b7; padding: 0.8rem; border-radius: 8px; }
+    .locked { border: 1px dashed #999; border-radius: 8px; padding: 1rem; margin-top: 1rem; }
+    .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    textarea { width: 100%; min-height: 320px; font-family: monospace; font-size: 14px; }
+    button { padding: 0.6rem 1rem; }
+    .anti-bot { border: 1px solid #ddd; border-radius: 8px; padding: 0.8rem; margin-top: 0.8rem; background: #fafafa; }
+    .anti-bot h3 { margin: 0 0 0.35rem 0; font-size: 15px; }
+    .anti-bot p { margin: 0 0 0.5rem 0; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <% const flagMap = { es: '🇪🇸', en: '🇬🇧', pt: '🇵🇹', fr: '🇫🇷', zh: '🇨🇳', ar: '🇸🇦' }; %>
+  <% const safeAntiBotConfig = (typeof antiBotConfig !== 'undefined' && antiBotConfig)
+    ? antiBotConfig
+    : { faceCheckEnabled: false, faceCheckTestMode: false, faceChallengeEndpoint: '/face-check/challenge', faceChallengeTtlMs: 120000 }; %>
+  <nav class="navbar">
+    <div class="brand">OCR Mock</div>
+    <div class="lang-wrap">
+      <span id="language-flag" class="flag-badge" aria-hidden="true"><%= flagMap[selectedLanguage] || '🌐' %></span>
+      <label for="language"><%= t('ui.languageLabel') %></label>
+      <select id="language" name="language" form="ocr-form" data-flags='<%- JSON.stringify(flagMap) %>'>
+        <% languageOptions.forEach(function(option) { %>
+          <option value="<%= option.code %>" <%= selectedLanguage === option.code ? 'selected' : '' %>><%= option.label %></option>
+        <% }) %>
+      </select>
+      <span class="tooltip">
+        <button type="button" class="tooltip-btn" aria-label="Info">i</button>
+        <span class="tooltip-text"><%= detectionMessage %></span>
+      </span>
+    </div>
+  </nav>
+
+  <h1><%= t('ui.heading') %></h1>
+  <div class="domain-badge">manuscritos.live</div>
+  <p><%= t('ui.subheading') %></p>
+
+  <section class="marketing">
+    <h2><%= t('marketing.title') %></h2>
+    <div class="marketing-grid">
+      <article class="marketing-card">
+        <h3><%= t('marketing.missionTitle') %></h3>
+        <p><%= t('marketing.missionBody') %></p>
+      </article>
+      <article class="marketing-card">
+        <h3><%= t('marketing.revivalTitle') %></h3>
+        <p><%= t('marketing.revivalBody') %></p>
+      </article>
+      <article class="marketing-card">
+        <h3><%= t('marketing.workflowTitle') %></h3>
+        <p><%= t('marketing.workflowBody') %></p>
+      </article>
+      <article class="marketing-card">
+        <h3><%= t('marketing.accessTitle') %></h3>
+        <p><%= t('marketing.accessBody') %></p>
+      </article>
+    </div>
+  </section>
+
+  <section class="faq">
+    <h2><%= t('faq.title') %></h2>
+    <details>
+      <summary><%= t('faq.q1') %></summary>
+      <p><%= t('faq.a1') %></p>
+    </details>
+    <details>
+      <summary><%= t('faq.q2') %></summary>
+      <p><%= t('faq.a2') %></p>
+    </details>
+    <details>
+      <summary><%= t('faq.q3') %></summary>
+      <p><%= t('faq.a3') %></p>
+    </details>
+    <details>
+      <summary><%= t('faq.q4') %></summary>
+      <p><%= t('faq.a4') %></p>
+    </details>
+  </section>
+
+  <form id="ocr-form" method="post" enctype="multipart/form-data">
+    <label for="image"><%= t('ui.imageLabel') %></label><br>
+    <input type="file" id="image" name="image" accept=".png,.jpg,.jpeg,.tif,.tiff" required>
+    <input type="hidden" id="client_preprocessed" name="client_preprocessed" value="0">
+    <input type="text" name="website_url" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px;opacity:0;pointer-events:none;" aria-hidden="true">
+
+    <div class="row">
+      <div>
+        <label for="profile"><%= t('ui.profileLabel') %></label><br>
+        <select id="profile" name="profile">
+          <option value="historico" <%= selectedProfile === 'historico' ? 'selected' : '' %>><%= t('ui.profileHistorical') %></option>
+          <option value="rapido" <%= selectedProfile === 'rapido' ? 'selected' : '' %>><%= t('ui.profileFast') %></option>
+        </select>
+      </div>
+      <div>
+        <label for="psm"><%= t('ui.psmLabel') %></label><br>
+        <select id="psm" name="psm">
+          <option value="6" <%= selectedPsm === '6' ? 'selected' : '' %>><%= t('ui.psm6') %></option>
+          <option value="11" <%= selectedPsm === '11' ? 'selected' : '' %>><%= t('ui.psm11') %></option>
+          <option value="4" <%= selectedPsm === '4' ? 'selected' : '' %>><%= t('ui.psm4') %></option>
+        </select>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+      </div>
+    </div>
+
+    <label>
+      <input type="checkbox" id="client-preprocess" checked>
+      <%= t('ui.preprocessBrowser') %>
+    </label>
+    <div class="anti-bot">
+      <h3><%= t('ui.faceCheckTitle') %></h3>
+      <p><%= safeAntiBotConfig.faceCheckEnabled ? t('ui.faceCheckActive') : t('ui.faceCheckInactive') %></p>
+      <% if (safeAntiBotConfig.faceCheckTestMode) { %>
+        <button type="button" id="test-face-check"><%= t('ui.faceCheckTestButton') %></button>
+      <% } %>
+    </div>
+    <p id="client-status"></p>
+    <input type="hidden" id="face_check_token" name="face_check_token" value="">
+
+    <button type="submit"><%= t('ui.processButton') %></button>
+  </form>
+
+  <% if (error) { %>
+    <div class="error"><%= error %></div>
+  <% } %>
+
+  <% if (paymentMessage) { %>
+    <div class="ok"><%= paymentMessage %></div>
+  <% } %>
+
+  <h2><%= t('ui.summaryTitle') %></h2>
+  <textarea readonly><%= summaryText || t('ui.summaryPlaceholder') %></textarea>
+
+  <% if (fullText) { %>
+    <h2><%= t('ui.fullDocumentTitle') %></h2>
+    <textarea readonly><%= fullText %></textarea>
+  <% } else { %>
+    <div class="locked">
+      <h3><%= t('ui.lockedTitle') %></h3>
+      <p><%= t('ui.lockedDescription') %></p>
+      <form id="unlock-paypal" method="post" action="/unlock">
+        <input type="hidden" name="document_id" value="<%= documentId %>">
+        <input type="hidden" name="payment_method" value="paypal">
+        <input type="hidden" name="language" value="<%= selectedLanguage %>">
+      </form>
+      <form id="unlock-metamask" method="post" action="/unlock">
+        <input type="hidden" name="document_id" value="<%= documentId %>">
+        <input type="hidden" name="payment_method" value="metamask">
+        <input type="hidden" name="language" value="<%= selectedLanguage %>">
+      </form>
+      <div class="actions">
+        <button type="button" id="pay-paypal" <%= documentId ? '' : 'disabled' %>><%= t('payment.paypalButton') %></button>
+        <button type="button" id="pay-metamask" <%= documentId ? '' : 'disabled' %>><%= t('payment.metamaskButton') %></button>
+      </div>
+    </div>
+  <% } %>
+
+  <script>
+    window.ANTI_BOT_CONFIG = {
+      faceCheckEnabled: <%= safeAntiBotConfig.faceCheckEnabled ? 'true' : 'false' %>,
+      faceCheckTestMode: <%= safeAntiBotConfig.faceCheckTestMode ? 'true' : 'false' %>,
+      faceChallengeEndpoint: <%- JSON.stringify(safeAntiBotConfig.faceChallengeEndpoint || '/face-check/challenge') %>,
+      faceChallengeTtlMs: <%= Number(safeAntiBotConfig.faceChallengeTtlMs || 120000) %>
+    };
+    window.UI_TRANSLATIONS = {
+      unsupportedFormat: <%- JSON.stringify(t('client.unsupportedFormat')) %>,
+      preprocessing: <%- JSON.stringify(t('client.preprocessing')) %>,
+      preprocessingReady: <%- JSON.stringify(t('client.preprocessingReady')) %>,
+      preprocessingError: <%- JSON.stringify(t('client.preprocessingError')) %>,
+      likelyPrintedWarning: <%- JSON.stringify(t('client.likelyPrintedWarning')) %>,
+      likelyPrintedConfirm: <%- JSON.stringify(t('client.likelyPrintedConfirm')) %>,
+      faceCheckStarting: <%- JSON.stringify(t('client.faceCheckStarting')) %>,
+      faceCheckUnsupported: <%- JSON.stringify(t('client.faceCheckUnsupported')) %>,
+      faceCheckNoCamera: <%- JSON.stringify(t('client.faceCheckNoCamera')) %>,
+      faceCheckNoFace: <%- JSON.stringify(t('client.faceCheckNoFace')) %>,
+      faceCheckOk: <%- JSON.stringify(t('client.faceCheckOk')) %>,
+      faceCheckRequired: <%- JSON.stringify(t('client.faceCheckRequired')) %>,
+      faceCheckChallengeError: <%- JSON.stringify(t('client.faceCheckChallengeError')) %>,
+      faceCheckError: <%- JSON.stringify(t('client.faceCheckError')) %>,
+      connectingPayment: <%- JSON.stringify(t('client.connectingPayment')) %>,
+      paymentAuthorized: <%- JSON.stringify(t('client.paymentAuthorized')) %>
+    };
+  </script>
+  <script src="/static/manuscript-validator.js"></script>
+  <script src="/static/client.js"></script>
+</body>
+</html>

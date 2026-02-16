@@ -1,0 +1,563 @@
+const path = require('path');
+const fs = require('fs/promises');
+const crypto = require('crypto');
+
+const express = require('express');
+const geoip = require('geoip-lite');
+const i18next = require('i18next');
+const i18nextBackend = require('i18next-fs-backend');
+const i18nextMiddleware = require('i18next-http-middleware');
+const rateLimit = require('express-rate-limit');
+const multer = require('multer');
+const sharp = require('sharp');
+
+const app = express();
+const PORT = process.env.PORT || 8000;
+
+const BASE_DIR = __dirname;
+const DATA_DIR = path.join(BASE_DIR, 'data');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+const WORK_DIR = path.join(DATA_DIR, 'work');
+const LOCALES_DIR = path.join(BASE_DIR, 'locales');
+
+const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff']);
+const mockDocuments = new Map();
+const SUPPORTED_LANGUAGES = ['es', 'en', 'pt', 'fr', 'zh', 'ar'];
+const LANGUAGE_OPTIONS = [
+  { code: 'es', label: 'Español' },
+  { code: 'en', label: 'English' },
+  { code: 'pt', label: 'Português' },
+  { code: 'fr', label: 'Français' },
+  { code: 'zh', label: '中文' },
+  { code: 'ar', label: 'العربية' },
+];
+const RTL_LANGUAGES = new Set(['ar']);
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const OCR_COOLDOWN_MS = 15 * 1000;
+const FACE_ANTIBOT_ENABLED = process.env.FACE_ANTIBOT_ENABLED === '1';
+const FACE_ANTIBOT_TEST_MODE = process.env.FACE_ANTIBOT_TEST_MODE !== '0';
+const FACE_CHALLENGE_TTL_MS = Number(process.env.FACE_ANTIBOT_CHALLENGE_TTL_MS || 2 * 60 * 1000);
+const FACE_CHALLENGE_SECRET = String(process.env.FACE_ANTIBOT_SECRET || 'change-this-face-antibot-secret');
+const LANGUAGE_COUNTRIES = {
+  es: new Set(['ES', 'MX', 'AR', 'CO', 'PE', 'VE', 'CL', 'EC', 'GT', 'CU', 'BO', 'DO', 'HN', 'PY', 'SV', 'NI', 'CR', 'PA', 'UY']),
+  pt: new Set(['PT', 'BR', 'AO', 'MZ', 'CV', 'GW', 'ST', 'TL']),
+  fr: new Set(['FR', 'BE', 'CH', 'LU', 'MC', 'SN', 'CI', 'CM']),
+  zh: new Set(['CN', 'TW', 'HK', 'MO', 'SG']),
+  ar: new Set(['SA', 'AE', 'QA', 'KW', 'OM', 'BH', 'IQ', 'JO', 'LB', 'SY', 'PS', 'YE', 'EG', 'LY', 'SD', 'MA', 'DZ', 'TN']),
+};
+const lastOcrAtByIp = new Map();
+const faceCheckChallenges = new Map();
+
+function normalizeLanguage(value) {
+  if (!value) {
+    return 'en';
+  }
+  const normalized = String(value).toLowerCase();
+  return SUPPORTED_LANGUAGES.includes(normalized) ? normalized : 'en';
+}
+
+function getCountryFromIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  const rawIp = Array.isArray(forwarded)
+    ? forwarded[0]
+    : (forwarded ? String(forwarded).split(',')[0].trim() : req.ip);
+
+  if (!rawIp) {
+    return null;
+  }
+
+  const normalizedIp = rawIp.replace('::ffff:', '');
+  const geo = geoip.lookup(normalizedIp);
+  return geo?.country || null;
+}
+
+function detectLanguageFromCountry(countryCode) {
+  if (!countryCode) {
+    return 'en';
+  }
+
+  for (const [language, countries] of Object.entries(LANGUAGE_COUNTRIES)) {
+    if (countries.has(countryCode)) {
+      return language;
+    }
+  }
+
+  return 'en';
+}
+
+function resolveLanguage(req) {
+  return normalizeLanguage(req.body?.language || req.query?.lng || req.ipLanguage || req.language);
+}
+
+function tLang(req, key, options = {}) {
+  const language = resolveLanguage(req);
+  return i18next.t(key, { lng: language, ...options });
+}
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  const rawIp = Array.isArray(forwarded)
+    ? forwarded[0]
+    : (forwarded ? String(forwarded).split(',')[0].trim() : req.ip || 'unknown');
+
+  return String(rawIp).replace('::ffff:', '');
+}
+
+function signFacePayload(encodedPayload) {
+  return crypto
+    .createHmac('sha256', FACE_CHALLENGE_SECRET)
+    .update(encodedPayload)
+    .digest('base64url');
+}
+
+function issueFaceChallenge(req) {
+  const now = Date.now();
+  const nonce = crypto.randomBytes(18).toString('base64url');
+  const payload = {
+    nonce,
+    iat: now,
+    exp: now + FACE_CHALLENGE_TTL_MS,
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const signature = signFacePayload(encodedPayload);
+  const token = `${encodedPayload}.${signature}`;
+
+  faceCheckChallenges.set(nonce, {
+    ip: getClientIp(req),
+    issuedAt: now,
+    expiresAt: payload.exp,
+    used: false,
+  });
+
+  return { token, expiresAt: payload.exp };
+}
+
+function verifyFaceChallenge(req, token) {
+  if (!token || typeof token !== 'string') {
+    return false;
+  }
+
+  const parts = token.split('.');
+  if (parts.length !== 2) {
+    return false;
+  }
+
+  const [encodedPayload, receivedSignature] = parts;
+  const expectedSignature = signFacePayload(encodedPayload);
+
+  const receivedBuffer = Buffer.from(receivedSignature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (receivedBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(receivedBuffer, expectedBuffer)) {
+    return false;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+  } catch (_error) {
+    return false;
+  }
+
+  const nonce = payload?.nonce;
+  const exp = Number(payload?.exp || 0);
+  const now = Date.now();
+
+  if (!nonce || !exp || now > exp) {
+    return false;
+  }
+
+  const challenge = faceCheckChallenges.get(nonce);
+  if (!challenge || challenge.used) {
+    return false;
+  }
+
+  if (challenge.ip !== getClientIp(req)) {
+    return false;
+  }
+
+  if (now > challenge.expiresAt) {
+    faceCheckChallenges.delete(nonce);
+    return false;
+  }
+
+  challenge.used = true;
+  challenge.usedAt = now;
+  faceCheckChallenges.set(nonce, challenge);
+  return true;
+}
+
+function cleanupFaceChallenges() {
+  const now = Date.now();
+  for (const [nonce, challenge] of faceCheckChallenges.entries()) {
+    const shouldDeleteExpired = now > challenge.expiresAt;
+    const shouldDeleteUsed = challenge.used && now - (challenge.usedAt || challenge.issuedAt || 0) > 5 * 60 * 1000;
+    if (shouldDeleteExpired || shouldDeleteUsed) {
+      faceCheckChallenges.delete(nonce);
+    }
+  }
+}
+
+app.set('view engine', 'ejs');
+app.set('views', path.join(BASE_DIR, 'templates'));
+app.set('trust proxy', true);
+app.use(express.urlencoded({ extended: true }));
+app.use(
+  i18nextMiddleware.handle(i18next, {
+    ignoreRoutes: ['/static'],
+  }),
+);
+app.use((req, _res, next) => {
+  req.ipCountry = getCountryFromIp(req);
+  req.ipLanguage = detectLanguageFromCountry(req.ipCountry);
+  next();
+});
+
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => getClientIp(req),
+  handler: (req, res) => {
+    res.status(429);
+    return renderPage(req, res, {
+      error: tLang(req, 'errors.tooManyRequests'),
+      selectedLanguage: resolveLanguage(req),
+    });
+  },
+});
+
+const ocrLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => getClientIp(req),
+  handler: (req, res) => {
+    res.status(429);
+    return renderPage(req, res, {
+      error: tLang(req, 'errors.ocrRateLimit'),
+      selectedLanguage: resolveLanguage(req),
+    });
+  },
+});
+
+app.use(generalLimiter);
+
+app.use('/static', express.static(path.join(BASE_DIR, 'public')));
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    cb(null, `${id}${ext}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: MAX_UPLOAD_BYTES,
+  },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      return cb(new Error(req.t('errors.unsupportedFormat')));
+    }
+    cb(null, true);
+  },
+});
+
+async function ensureDirs() {
+  await fs.mkdir(UPLOADS_DIR, { recursive: true });
+  await fs.mkdir(WORK_DIR, { recursive: true });
+}
+
+async function preprocessImage(inputPath, outputPath, profile) {
+  const baseImage = sharp(inputPath).rotate().grayscale();
+
+  if (profile === 'historico') {
+    const metadata = await baseImage.metadata();
+    const currentWidth = metadata.width || 1200;
+    const scaledWidth = Math.max(1, Math.round(currentWidth * 1.6));
+
+    await baseImage
+      .resize({ width: scaledWidth, kernel: sharp.kernel.lanczos3 })
+      .normalise()
+      .median(3)
+      .threshold(170)
+      .png()
+      .toFile(outputPath);
+    return;
+  }
+
+  await baseImage.normalise().sharpen().png().toFile(outputPath);
+}
+
+function buildMockSummary(language) {
+  const lines = i18next.t('mock.summaryLines', {
+    lng: language,
+    returnObjects: true,
+  });
+  return Array.isArray(lines) ? lines.join('\n') : '';
+}
+
+function buildMockFullDocument(language) {
+  const lines = i18next.t('mock.fullDocumentLines', {
+    lng: language,
+    returnObjects: true,
+  });
+  return Array.isArray(lines) ? lines.join('\n') : '';
+}
+
+function buildViewModel(req, extra = {}) {
+  const explicitLanguage = extra.selectedLanguage || req.body?.language || req.query?.lng;
+  const currentLanguage = normalizeLanguage(
+    explicitLanguage || req.ipLanguage || req.language,
+  );
+  const usedFallback = !explicitLanguage && (!req.ipCountry || req.ipLanguage === 'en');
+  const t = (key, options = {}) => req.t(key, { lng: currentLanguage, ...options });
+  const detectedCountry = req.ipCountry || 'N/A';
+  const detectedLanguageLabel =
+    LANGUAGE_OPTIONS.find((option) => option.code === (req.ipLanguage || 'en'))?.label || 'English';
+  const detectionMessage = usedFallback
+    ? t('ui.detectedLanguageFallback', { country: detectedCountry })
+    : t('ui.detectedLanguageByIp', { language: detectedLanguageLabel, country: detectedCountry });
+
+  return {
+    t,
+    currentLanguage,
+    languageOptions: LANGUAGE_OPTIONS,
+    isRtl: RTL_LANGUAGES.has(currentLanguage),
+    error: null,
+    summaryText: '',
+    fullText: '',
+    documentId: '',
+    selectedProfile: 'historico',
+    selectedPsm: '6',
+    selectedLanguage: currentLanguage,
+    detectedCountry,
+    detectedLanguageLabel,
+    detectionMessage,
+    antiBotConfig: {
+      faceCheckEnabled: FACE_ANTIBOT_ENABLED,
+      faceCheckTestMode: FACE_ANTIBOT_TEST_MODE,
+      faceChallengeEndpoint: '/face-check/challenge',
+      faceChallengeTtlMs: FACE_CHALLENGE_TTL_MS,
+    },
+    paymentMessage: '',
+    ...extra,
+  };
+}
+
+function renderPage(req, res, extra = {}) {
+  return res.render('index', buildViewModel(req, extra));
+}
+
+function ocrCooldownMiddleware(req, res, next) {
+  const ip = getClientIp(req);
+  const now = Date.now();
+  const lastAt = lastOcrAtByIp.get(ip);
+  if (lastAt && now - lastAt < OCR_COOLDOWN_MS) {
+    const waitSeconds = Math.ceil((OCR_COOLDOWN_MS - (now - lastAt)) / 1000);
+    res.status(429);
+    return renderPage(req, res, {
+      error: tLang(req, 'errors.cooldown', { seconds: waitSeconds }),
+      selectedLanguage: resolveLanguage(req),
+    });
+  }
+
+  lastOcrAtByIp.set(ip, now);
+  return next();
+}
+
+function requestTimeoutMiddleware(timeoutMs) {
+  return (req, res, next) => {
+    res.setTimeout(timeoutMs, () => {
+      if (res.headersSent) {
+        return;
+      }
+      res.status(408);
+      renderPage(req, res, {
+        error: tLang(req, 'errors.requestTimeout'),
+        selectedLanguage: resolveLanguage(req),
+      });
+    });
+    next();
+  };
+}
+
+app.get('/', (req, res) => {
+  renderPage(req, res);
+});
+
+app.get('/face-check/challenge', (req, res) => {
+  if (!FACE_ANTIBOT_ENABLED && !FACE_ANTIBOT_TEST_MODE) {
+    return res.status(404).json({ ok: false });
+  }
+
+  const { token, expiresAt } = issueFaceChallenge(req);
+  return res.json({ ok: true, token, expiresAt });
+});
+
+app.post('/', ocrLimiter, requestTimeoutMiddleware(45 * 1000), upload.single('image'), ocrCooldownMiddleware, async (req, res) => {
+  const selectedProfile = req.body.profile || 'historico';
+  const selectedPsm = req.body.psm || '6';
+  const selectedLanguage = normalizeLanguage(req.body.language || req.query?.lng || req.ipLanguage || req.language);
+  const clientPreprocessed = req.body.client_preprocessed === '1';
+
+  if ((req.body.website_url || '').trim() !== '') {
+    res.status(400);
+    return renderPage(req, res, {
+      error: i18next.t('errors.botBlocked', { lng: selectedLanguage }),
+      selectedProfile,
+      selectedPsm,
+      selectedLanguage,
+    });
+  }
+
+  if (!req.file) {
+    res.status(400);
+    return renderPage(req, res, {
+      error: i18next.t('errors.selectImage', { lng: selectedLanguage }),
+      selectedProfile,
+      selectedPsm,
+      selectedLanguage,
+    });
+  }
+
+  if (FACE_ANTIBOT_ENABLED) {
+    const faceCheckToken = req.body.face_check_token;
+    if (!verifyFaceChallenge(req, faceCheckToken)) {
+      res.status(400);
+      return renderPage(req, res, {
+        error: i18next.t('errors.faceCheckInvalid', { lng: selectedLanguage }),
+        selectedProfile,
+        selectedPsm,
+        selectedLanguage,
+      });
+    }
+  }
+
+  const jobId = path.parse(req.file.filename).name;
+  const preprocessedPath = path.join(WORK_DIR, `${jobId}_preprocessed.png`);
+  try {
+    if (!clientPreprocessed) {
+      await preprocessImage(req.file.path, preprocessedPath, selectedProfile);
+    }
+
+    const summaryText = buildMockSummary(selectedLanguage);
+    const fullText = buildMockFullDocument(selectedLanguage);
+    mockDocuments.set(jobId, { summaryText, fullText, language: selectedLanguage });
+
+    return renderPage(req, res, {
+      summaryText,
+      fullText: '',
+      documentId: jobId,
+      selectedProfile,
+      selectedPsm,
+      selectedLanguage,
+    });
+  } catch (error) {
+    res.status(500);
+    return renderPage(req, res, {
+      error: i18next.t('errors.prepareMock', { lng: selectedLanguage }),
+      selectedProfile,
+      selectedPsm,
+      selectedLanguage,
+    });
+  }
+});
+
+app.post('/unlock', (req, res) => {
+  const { document_id: documentId, payment_method: paymentMethod } = req.body;
+  const selectedLanguage = normalizeLanguage(req.body.language || req.query?.lng || req.ipLanguage || req.language);
+
+  if (!documentId || !paymentMethod) {
+    res.status(400);
+    return renderPage(req, res, {
+      error: i18next.t('errors.missingPaymentData', { lng: selectedLanguage }),
+      selectedLanguage,
+    });
+  }
+
+  const doc = mockDocuments.get(documentId);
+  if (!doc) {
+    res.status(404);
+    return renderPage(req, res, {
+      error: i18next.t('errors.documentNotFound', { lng: selectedLanguage }),
+      selectedLanguage,
+    });
+  }
+
+  const language = doc.language || selectedLanguage;
+  const methodLabel = paymentMethod === 'paypal'
+    ? i18next.t('payment.paypalLabel', { lng: language })
+    : i18next.t('payment.metamaskLabel', { lng: language });
+  const paymentMessage = i18next.t('messages.paymentSuccess', {
+    lng: language,
+    method: methodLabel,
+  });
+
+  return renderPage(req, res, {
+    summaryText: doc.summaryText,
+    fullText: doc.fullText,
+    documentId,
+    selectedLanguage: language,
+    paymentMessage,
+  });
+});
+
+app.use((error, req, res, _next) => {
+  const selectedLanguage = normalizeLanguage(req?.query?.lng || req?.body?.language || req?.ipLanguage || req?.language);
+  const isFileTooLarge = error?.code === 'LIMIT_FILE_SIZE';
+  res.status(400);
+  renderPage(req, res, {
+    error: isFileTooLarge
+      ? i18next.t('errors.fileTooLarge', { lng: selectedLanguage, sizeMB: Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024)) })
+      : (error.message || i18next.t('errors.invalidRequest', { lng: selectedLanguage })),
+    selectedLanguage,
+  });
+});
+
+async function initI18n() {
+  await i18next
+    .use(i18nextBackend)
+    .use(i18nextMiddleware.LanguageDetector)
+    .init({
+      fallbackLng: 'en',
+      preload: SUPPORTED_LANGUAGES,
+      supportedLngs: SUPPORTED_LANGUAGES,
+      ns: ['translation'],
+      defaultNS: 'translation',
+      backend: {
+        loadPath: path.join(LOCALES_DIR, '{{lng}}/translation.json'),
+      },
+      detection: {
+        order: ['querystring', 'body', 'header'],
+        lookupQuerystring: 'lng',
+        lookupBody: 'language',
+      },
+      interpolation: {
+        escapeValue: false,
+      },
+    });
+}
+
+async function start() {
+  await ensureDirs();
+  await initI18n();
+  const cleanupTimer = setInterval(cleanupFaceChallenges, 60 * 1000);
+  if (typeof cleanupTimer.unref === 'function') {
+    cleanupTimer.unref();
+  }
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor OCR en http://localhost:${PORT}`);
+  });
+}
+
+start().catch((error) => {
+  console.error('No se pudo iniciar el servidor OCR:', error);
+  process.exit(1);
+});

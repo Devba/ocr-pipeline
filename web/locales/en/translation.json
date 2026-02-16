@@ -1,0 +1,113 @@
+{
+  "ui": {
+    "pageTitle": "Handwritten OCR",
+    "heading": "OCR for handwritten documents",
+    "subheading": "Commercial mockup: free incomplete summary. Full document after payment.",
+    "imageLabel": "Image (PNG/JPG/TIF)",
+    "profileLabel": "Profile",
+    "profileHistorical": "Historical (recommended)",
+    "profileFast": "Fast",
+    "psmLabel": "PSM Tesseract",
+    "psm6": "6 - uniform text block",
+    "psm11": "11 - sparse text",
+    "psm4": "4 - multi-column",
+    "languageLabel": "Language",
+    "detectedLanguageByIp": "Detected by IP: {{language}} ({{country}})",
+    "detectedLanguageFallback": "Uncertain detection ({{country}}), using English",
+    "preprocessBrowser": "Preprocess in browser (beta)",
+    "faceCheckTitle": "Camera anti-bot face check",
+    "faceCheckActive": "Face check is active for submissions.",
+    "faceCheckInactive": "Face check is inactive by default (test mode available).",
+    "faceCheckTestButton": "Test face check",
+    "processButton": "Process OCR",
+    "summaryTitle": "Free summary (incomplete)",
+    "summaryPlaceholder": "Upload and process an image to get the free summary.",
+    "fullDocumentTitle": "Full document",
+    "lockedTitle": "Full document locked",
+    "lockedDescription": "To unlock the full transcription, choose a payment method (simulated)."
+  },
+  "marketing": {
+    "title": "Revive manuscripts once considered dead",
+    "missionTitle": "Our mission",
+    "missionBody": "At manuscritos.live we turn old manuscript images into useful, readable, reusable text for research, family archives, and historical memory.",
+    "revivalTitle": "From dead document to living voice",
+    "revivalBody": "Many manuscripts remain forgotten in boxes and archives. Our product brings them back to digital life so they can be studied, shared, and circulated again.",
+    "workflowTitle": "Simple workflow, immediate value",
+    "workflowBody": "Upload an image, get a free incomplete summary, and unlock the full version when needed. Built to validate value quickly.",
+    "accessTitle": "Global access",
+    "accessBody": "Designed to work across multiple languages so different communities can rescue documentary heritage without technical barriers."
+  },
+  "faq": {
+    "title": "FAQ",
+    "q1": "What does manuscritos.live do?",
+    "a1": "It converts manuscript images into useful digital text for research, family archives, and historical memory.",
+    "q2": "What do I get for free?",
+    "a2": "An incomplete summary of the document so you can quickly assess value before unlocking the full version.",
+    "q3": "How does unlocking work?",
+    "a3": "In this mockup, PayPal and MetaMask payments are simulated to validate the product experience.",
+    "q4": "What images work best?",
+    "a4": "Scans or focused photos, good lighting, low shadow, and enough resolution for readable text."
+  },
+  "errors": {
+    "selectImage": "Select an image to process.",
+    "unsupportedFormat": "Unsupported format. Use PNG, JPG, JPEG, TIF or TIFF.",
+    "tooManyRequests": "Too many requests in a short time. Please try again in a few minutes.",
+    "ocrRateLimit": "OCR rate limit reached for this IP. Please wait a few minutes.",
+    "cooldown": "Wait {{seconds}} seconds before running another OCR.",
+    "botBlocked": "Request blocked by anti-bot protection.",
+    "faceCheckInvalid": "Face check is invalid or expired. Verify your face again and retry.",
+    "requestTimeout": "The operation took too long. Please try again.",
+    "fileTooLarge": "File too large. Maximum allowed size: {{sizeMB}} MB.",
+    "prepareMock": "Error preparing document mockup.",
+    "missingPaymentData": "Missing data to simulate payment.",
+    "documentNotFound": "Document not found for unlock.",
+    "invalidRequest": "Invalid request."
+  },
+  "payment": {
+    "paypalLabel": "PayPal",
+    "metamaskLabel": "MetaMask",
+    "paypalButton": "Pay with PayPal (simulated)",
+    "metamaskButton": "Pay with MetaMask (simulated)"
+  },
+  "messages": {
+    "paymentSuccess": "Simulated payment with {{method}} completed. Full document unlocked."
+  },
+  "mock": {
+    "summaryLines": [
+      "Preliminary summary (incomplete):",
+      "- A handwritten letter with administrative references is identified.",
+      "- Partial mentions of dates and proper names are visible.",
+      "- The content suggests historical context and documentary value.",
+      "",
+      "To see the full transcription, unlock the document with payment."
+    ],
+    "fullDocumentLines": [
+      "Full document (mock):",
+      "\"In the town, on the fourteenth day of May nineteen sixty-two,",
+      "record is made of the receipt of the inventoried goods",
+      "and the agreement of the signing parties for archival custody.\"",
+      "",
+      "Note: this transcription is simulated for the commercial mockup."
+    ]
+  },
+  "client": {
+    "unsupportedFormat": "Unsupported format. Use PNG, JPG, JPEG, TIF or TIFF.",
+    "preprocessing": "Preprocessing image in browser...",
+    "preprocessingReady": "Preprocessing ready. Sending to server...",
+    "preprocessingError": "Local preprocessing error.",
+    "likelyNoTextWarning": "The image seems to contain no readable text for OCR.",
+    "likelyNoTextConfirm": "This looks like a photo without text (for example, a face). Continue anyway?",
+    "likelyPrintedWarning": "The image looks like machine-typed or digital text, not handwritten.",
+    "likelyPrintedConfirm": "This image may not be handwritten. Do you want to continue anyway?",
+    "faceCheckStarting": "Starting camera face check...",
+    "faceCheckUnsupported": "This browser does not support automatic face detection.",
+    "faceCheckNoCamera": "Camera access is not available on this browser or device.",
+    "faceCheckNoFace": "No face detected in camera. Please try again.",
+    "faceCheckOk": "Face check completed (test mode).",
+    "faceCheckRequired": "Face check is required before submitting.",
+    "faceCheckChallengeError": "Could not generate a secure verification token.",
+    "faceCheckError": "Could not complete face check.",
+    "connectingPayment": "Connecting to {{method}} (simulated)...",
+    "paymentAuthorized": "Payment in {{method}} authorized (simulated)."
+  }
+}
