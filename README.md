@@ -123,3 +123,59 @@ FACE_ANTIBOT_ENABLED=0 FACE_ANTIBOT_TEST_MODE=1 bash run_web.sh
 4. Entrena modelo propio y reprocesa todo el lote.
 5. Exporta TXT/ALTO/PDF buscable.
 
+## Piloto OCR con Google Document AI (manuscritos)
+
+Este repo incluye un piloto para evaluar **Enterprise Document OCR** de Document AI
+contra el pipeline local actual.
+
+### 1) Crear procesador OCR en Google Cloud
+
+- Tipo recomendado: **OCR_ PROCESSOR** (Enterprise Document OCR).
+- Region sugerida: `us` o `eu` (elige segun residencia de datos y latencia).
+
+### 2) Credenciales
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS="/ruta/service-account.json"
+```
+
+### 3) Dependencia Python
+
+```bash
+pip install google-cloud-documentai
+```
+
+### 4) Ejecutar OCR de Document AI sobre tus imagenes
+
+```bash
+python3 scripts/docai_ocr.py \
+  --input_dir raw \
+  --output_dir ocr_docai \
+  --project_id TU_PROJECT_ID \
+  --location us \
+  --processor_id TU_PROCESSOR_ID
+```
+
+Opcional: fijar version del procesador
+
+```bash
+python3 scripts/docai_ocr.py \
+  --input_dir raw \
+  --output_dir ocr_docai \
+  --project_id TU_PROJECT_ID \
+  --location us \
+  --processor_id TU_PROCESSOR_ID \
+  --processor_version_id TU_VERSION_ID
+```
+
+### 5) Comparar calidad con CER
+
+Con tus transcripciones en `ground_truth/`:
+
+```bash
+python3 scripts/compute_cer.py --gt_dir ground_truth --ocr_dir ocr
+python3 scripts/compute_cer.py --gt_dir ground_truth --ocr_dir ocr_docai
+```
+
+Compara promedio CER, latencia y coste por pagina para decidir adopcion.
+
