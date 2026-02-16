@@ -56,6 +56,114 @@ const lastOcrAtByIp = new Map();
 const faceCheckChallenges = new Map();
 const paypalOrders = new Map();
 
+const ADMIN_STATS_TOKEN = String(process.env.ADMIN_STATS_TOKEN || '').trim();
+const METRICS_IP_SECRET = String(process.env.METRICS_IP_SECRET || FACE_CHALLENGE_SECRET).trim();
+
+const metricsState = {
+  startedAt: Date.now(),
+  totalRequests: 0,
+  totalErrors: 0,
+  statusCounts: new Map(),
+  methodCounts: new Map(),
+  pathCounts: new Map(),
+  botUserAgentHits: 0,
+  honeypotHits: 0,
+  faceCheckFails: 0,
+  cooldownHits: 0,
+  rateLimitHits: 0,
+  unsupportedFormatHits: 0,
+  uniqueVisitors: new Map(),
+  recentEvents: [],
+};
+
+const MAX_RECENT_EVENTS = 200;
+const UNIQUE_VISITOR_TTL_MS = 24 * 60 * 60 * 1000;
+const BOT_UA_REGEX = /\b(bot|spider|crawler|crawl|slurp)\b|\b(curl|wget|python-requests|httpclient|go-http-client)\b/i;
+
+function hashIpForMetrics(ip) {
+  const raw = String(ip || 'unknown');
+  if (!METRICS_IP_SECRET) {
+    return raw;
+  }
+  return crypto
+    .createHmac('sha256', METRICS_IP_SECRET)
+    .update(raw)
+    .digest('hex')
+    .slice(0, 16);
+}
+
+function normalizePathForMetrics(req) {
+  const raw = String(req.path || '/');
+  if (raw.startsWith('/static/')) {
+    return '/static/*';
+  }
+  return raw;
+}
+
+function incMapCounter(map, key, amount = 1) {
+  const current = Number(map.get(key) || 0);
+  map.set(key, current + amount);
+}
+
+function pushRecentEvent(event) {
+  metricsState.recentEvents.push(event);
+  if (metricsState.recentEvents.length > MAX_RECENT_EVENTS) {
+    metricsState.recentEvents.splice(0, metricsState.recentEvents.length - MAX_RECENT_EVENTS);
+  }
+}
+
+function markBotReason(res, reason) {
+  if (!res.locals) {
+    return;
+  }
+  if (!Array.isArray(res.locals.botReasons)) {
+    res.locals.botReasons = [];
+  }
+  if (reason && !res.locals.botReasons.includes(reason)) {
+    res.locals.botReasons.push(reason);
+  }
+}
+
+function pruneUniqueVisitors(now) {
+  for (const [key, lastSeenAt] of metricsState.uniqueVisitors.entries()) {
+    if (now - Number(lastSeenAt || 0) > UNIQUE_VISITOR_TTL_MS) {
+      metricsState.uniqueVisitors.delete(key);
+    }
+  }
+}
+
+function buildMetricsSnapshot() {
+  const now = Date.now();
+  pruneUniqueVisitors(now);
+
+  const topEntries = (map, limit = 20) =>
+    Array.from(map.entries())
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .slice(0, limit)
+      .map(([key, value]) => ({ key, count: Number(value) }));
+
+  return {
+    ok: true,
+    startedAt: metricsState.startedAt,
+    uptimeSeconds: Math.round((now - metricsState.startedAt) / 1000),
+    totalRequests: metricsState.totalRequests,
+    totalErrors: metricsState.totalErrors,
+    uniqueVisitors24h: metricsState.uniqueVisitors.size,
+    bots: {
+      botUserAgentHits: metricsState.botUserAgentHits,
+      honeypotHits: metricsState.honeypotHits,
+      faceCheckFails: metricsState.faceCheckFails,
+      cooldownHits: metricsState.cooldownHits,
+      rateLimitHits: metricsState.rateLimitHits,
+      unsupportedFormatHits: metricsState.unsupportedFormatHits,
+    },
+    topPaths: topEntries(metricsState.pathCounts),
+    statusCounts: topEntries(metricsState.statusCounts, 50),
+    methodCounts: topEntries(metricsState.methodCounts, 20),
+    recentEvents: metricsState.recentEvents.slice(-50),
+  };
+}
+
 function isValidMoneyAmount(value) {
   const normalized = String(value || '').trim();
   return /^\d+(?:\.\d{1,2})?$/.test(normalized) && Number(normalized) > 0;
@@ -235,6 +343,49 @@ function cleanupFaceChallenges() {
 app.set('view engine', 'ejs');
 app.set('views', path.join(BASE_DIR, 'templates'));
 app.set('trust proxy', true);
+
+app.use((req, res, next) => {
+  const startNs = process.hrtime.bigint();
+  res.locals.botReasons = [];
+
+  const clientIp = getClientIp(req);
+  const visitorKey = hashIpForMetrics(clientIp);
+  metricsState.uniqueVisitors.set(visitorKey, Date.now());
+
+  const ua = String(req.headers['user-agent'] || '');
+  if (ua && BOT_UA_REGEX.test(ua)) {
+    metricsState.botUserAgentHits += 1;
+    markBotReason(res, 'bot_ua');
+  }
+
+  res.on('finish', () => {
+    const endNs = process.hrtime.bigint();
+    const durationMs = Number(endNs - startNs) / 1_000_000;
+
+    metricsState.totalRequests += 1;
+    incMapCounter(metricsState.methodCounts, String(req.method || 'GET').toUpperCase());
+    incMapCounter(metricsState.pathCounts, normalizePathForMetrics(req));
+    incMapCounter(metricsState.statusCounts, String(res.statusCode || 0));
+
+    if (res.statusCode >= 400) {
+      metricsState.totalErrors += 1;
+    }
+
+    pushRecentEvent({
+      at: Date.now(),
+      ip: visitorKey,
+      method: String(req.method || 'GET').toUpperCase(),
+      path: normalizePathForMetrics(req),
+      status: res.statusCode,
+      ms: Math.round(durationMs),
+      ua: ua ? ua.slice(0, 160) : '',
+      botReasons: Array.isArray(res.locals.botReasons) ? res.locals.botReasons : [],
+    });
+  });
+
+  next();
+});
+
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use(
@@ -259,6 +410,8 @@ const generalLimiter = rateLimit({
     return method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
   },
   handler: (req, res) => {
+    metricsState.rateLimitHits += 1;
+    markBotReason(res, 'rate_limit');
     res.status(429);
     return renderPage(req, res, {
       error: tLang(req, 'errors.tooManyRequests'),
@@ -274,6 +427,8 @@ const ocrLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => getClientIp(req),
   handler: (req, res) => {
+    metricsState.rateLimitHits += 1;
+    markBotReason(res, 'rate_limit');
     res.status(429);
     return renderPage(req, res, {
       error: tLang(req, 'errors.ocrRateLimit'),
@@ -307,10 +462,16 @@ const upload = multer({
 
     if (ext) {
       if (!ALLOWED_EXTENSIONS.has(ext)) {
-        return cb(new Error(req.t('errors.unsupportedFormat')));
+        metricsState.unsupportedFormatHits += 1;
+        const err = new Error(req.t('errors.unsupportedFormat'));
+        err.code = 'UNSUPPORTED_FORMAT';
+        return cb(err);
       }
     } else if (!looksLikeImage) {
-      return cb(new Error(req.t('errors.unsupportedFormat')));
+      metricsState.unsupportedFormatHits += 1;
+      const err = new Error(req.t('errors.unsupportedFormat'));
+      err.code = 'UNSUPPORTED_FORMAT';
+      return cb(err);
     }
     cb(null, true);
   },
@@ -415,6 +576,8 @@ function ocrCooldownMiddleware(req, res, next) {
   const now = Date.now();
   const lastAt = lastOcrAtByIp.get(ip);
   if (lastAt && now - lastAt < OCR_COOLDOWN_MS) {
+    metricsState.cooldownHits += 1;
+    markBotReason(res, 'cooldown');
     const waitSeconds = Math.ceil((OCR_COOLDOWN_MS - (now - lastAt)) / 1000);
     res.status(429);
     return renderPage(req, res, {
@@ -445,6 +608,34 @@ function requestTimeoutMiddleware(timeoutMs) {
 
 app.get('/', (req, res) => {
   renderPage(req, res);
+});
+
+function extractAdminToken(req) {
+  const auth = String(req.headers.authorization || '').trim();
+  if (auth.toLowerCase().startsWith('bearer ')) {
+    return auth.slice(7).trim();
+  }
+  const q = req.query?.token;
+  return q ? String(q).trim() : '';
+}
+
+function requireAdminStatsToken(req, res, next) {
+  if (!ADMIN_STATS_TOKEN) {
+    return res.status(404).send('Not found');
+  }
+
+  const token = extractAdminToken(req);
+  if (!token || token !== ADMIN_STATS_TOKEN) {
+    markBotReason(res, 'admin_denied');
+    return res.status(401).json({ ok: false, error: 'unauthorized' });
+  }
+
+  return next();
+}
+
+app.get('/admin/stats', requireAdminStatsToken, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json(buildMetricsSnapshot());
 });
 
 app.get('/face-check/challenge', (req, res) => {
@@ -574,6 +765,8 @@ app.post('/', ocrLimiter, requestTimeoutMiddleware(45 * 1000), upload.single('im
   const clientPreprocessed = req.body.client_preprocessed === '1';
 
   if ((req.body.website_url || '').trim() !== '') {
+    metricsState.honeypotHits += 1;
+    markBotReason(res, 'honeypot');
     res.status(400);
     return renderPage(req, res, {
       error: i18next.t('errors.botBlocked', { lng: selectedLanguage }),
@@ -596,6 +789,8 @@ app.post('/', ocrLimiter, requestTimeoutMiddleware(45 * 1000), upload.single('im
   if (FACE_ANTIBOT_ENABLED) {
     const faceCheckToken = req.body.face_check_token;
     if (!verifyFaceChallenge(req, faceCheckToken)) {
+      metricsState.faceCheckFails += 1;
+      markBotReason(res, 'face_check_fail');
       res.status(400);
       return renderPage(req, res, {
         error: i18next.t('errors.faceCheckInvalid', { lng: selectedLanguage }),

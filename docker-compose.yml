@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     environment:
       PORT: "8000"
+      ADMIN_STATS_TOKEN: "${ADMIN_STATS_TOKEN:-}"
+      METRICS_IP_SECRET: "${METRICS_IP_SECRET:-}"
       FACE_ANTIBOT_ENABLED: "${FACE_ANTIBOT_ENABLED:-0}"
       FACE_ANTIBOT_TEST_MODE: "${FACE_ANTIBOT_TEST_MODE:-0}"
       FACE_ANTIBOT_SECRET: "${FACE_ANTIBOT_SECRET:-change-this-in-production}"
