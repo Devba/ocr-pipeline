@@ -11,6 +11,11 @@ fi
 
 DATA_PATH="./deploy/certbot"
 
+SUDO=""
+if [[ "${EUID:-$(id -u)}" != "0" ]] && command -v sudo >/dev/null 2>&1; then
+  SUDO="sudo"
+fi
+
 mkdir -p "$DATA_PATH/conf" "$DATA_PATH/www"
 
 if [[ ! -e "$DATA_PATH/conf/options-ssl-nginx.conf" ]]; then
@@ -40,9 +45,9 @@ echo "== Arrancando Nginx para desafío ACME =="
 docker compose up -d nginx
 
 echo "== Eliminando certificado dummy (si existe) =="
-rm -rf "$DATA_PATH/conf/live/$DOMAIN" || true
-rm -rf "$DATA_PATH/conf/archive/$DOMAIN" || true
-rm -f "$DATA_PATH/conf/renewal/$DOMAIN.conf" || true
+rm -rf "$DATA_PATH/conf/live/$DOMAIN" 2>/dev/null || $SUDO rm -rf "$DATA_PATH/conf/live/$DOMAIN" || true
+rm -rf "$DATA_PATH/conf/archive/$DOMAIN" 2>/dev/null || $SUDO rm -rf "$DATA_PATH/conf/archive/$DOMAIN" || true
+rm -f "$DATA_PATH/conf/renewal/$DOMAIN.conf" 2>/dev/null || $SUDO rm -f "$DATA_PATH/conf/renewal/$DOMAIN.conf" || true
 
 echo "== Solicitando certificado real (Let's Encrypt) =="
 docker compose run --rm --entrypoint certbot certbot certonly \
@@ -52,6 +57,17 @@ docker compose run --rm --entrypoint certbot certbot certonly \
   --no-eff-email \
   -d "$DOMAIN" \
   -d "www.$DOMAIN"
+
+if [[ ! -e "$DATA_PATH/conf/live/$DOMAIN/fullchain.pem" ]]; then
+  candidate_dir="$(ls -dt "$DATA_PATH/conf/live/${DOMAIN}"-* 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$candidate_dir" && -d "$candidate_dir" ]]; then
+    echo "== Ajustando ruta live/$DOMAIN -> $(basename "$candidate_dir") =="
+    rm -rf "$DATA_PATH/conf/live/$DOMAIN" 2>/dev/null || $SUDO rm -rf "$DATA_PATH/conf/live/$DOMAIN" || true
+    (cd "$DATA_PATH/conf/live" && ln -sfn "$(basename "$candidate_dir")" "$DOMAIN") 2>/dev/null \
+      || $SUDO bash -lc "cd '$DATA_PATH/conf/live' && ln -sfn '$(basename "$candidate_dir")' '$DOMAIN'" \
+      || true
+  fi
+fi
 
 echo "== Recargando Nginx =="
 docker compose exec nginx nginx -s reload
