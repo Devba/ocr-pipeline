@@ -10,9 +10,11 @@
   const testFaceCheckButton = document.getElementById('test-face-check');
   const statusNode = document.getElementById('client-status');
   const paypalButton = document.getElementById('pay-paypal');
+  const paypalButtonsContainer = document.getElementById('paypal-buttons');
   const metamaskButton = document.getElementById('pay-metamask');
   const paypalForm = document.getElementById('unlock-paypal');
   const metamaskForm = document.getElementById('unlock-metamask');
+  const paypalOrderIdInput = document.getElementById('paypal_order_id');
 
   if (!form || !fileInput || !profileSelect || !languageSelect || !clientPreprocessCheckbox || !clientPreprocessedInput || !statusNode) {
     return;
@@ -31,6 +33,10 @@
 
   const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff']);
   let lastFaceCheckAt = 0;
+
+  const paymentConfig = window.PAYMENT_CONFIG || {};
+  const documentIdFromPage = window.DOCUMENT_ID || '';
+  const selectedLanguageFromPage = window.SELECTED_LANGUAGE || (languageSelect ? languageSelect.value : 'en');
 
   async function requestFaceCheckToken() {
     const url = new URL(faceChallengeEndpoint, window.location.origin);
@@ -330,7 +336,78 @@
     });
   }
 
-  simulatePayment(paypalButton, paypalForm, 'PayPal');
+  function setupPayPalSmartButtons() {
+    const enabled = paymentConfig && paymentConfig.paypalEnabled === true;
+    if (!enabled) {
+      simulatePayment(paypalButton, paypalForm, 'PayPal');
+      return;
+    }
+
+    if (!paypalButtonsContainer) {
+      return;
+    }
+
+    if (!window.paypal || typeof window.paypal.Buttons !== 'function') {
+      setStatus('PayPal SDK no disponible.', true);
+      return;
+    }
+
+    window.paypal.Buttons({
+      createOrder: async () => {
+        const response = await fetch(paymentConfig.paypalCreateOrderEndpoint || '/api/paypal/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            document_id: documentIdFromPage,
+            language: selectedLanguageFromPage,
+          }),
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.orderId) {
+          throw new Error(data.error || 'No se pudo crear la orden de PayPal.');
+        }
+        return data.orderId;
+      },
+      onApprove: async (data) => {
+        const orderId = data && data.orderID ? String(data.orderID) : '';
+        if (!orderId) {
+          setStatus('Orden PayPal inválida.', true);
+          return;
+        }
+
+        const response = await fetch(paymentConfig.paypalCaptureOrderEndpoint || '/api/paypal/capture-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            order_id: orderId,
+            document_id: documentIdFromPage,
+            language: selectedLanguageFromPage,
+          }),
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) {
+          setStatus(payload.error || 'No se pudo capturar el pago en PayPal.', true);
+          return;
+        }
+
+        if (paypalOrderIdInput) {
+          paypalOrderIdInput.value = orderId;
+        }
+
+        if (paypalForm) {
+          paypalForm.submit();
+        }
+      },
+      onError: (err) => {
+        const message = err && err.message ? String(err.message) : 'Error PayPal.';
+        setStatus(message, true);
+      },
+    }).render('#paypal-buttons');
+  }
+
+  setupPayPalSmartButtons();
   simulatePayment(metamaskButton, metamaskForm, 'MetaMask');
 
   if (testFaceCheckButton && faceCheckTestMode) {

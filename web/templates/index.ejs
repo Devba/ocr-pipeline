@@ -215,6 +215,7 @@
         <input type="hidden" name="document_id" value="<%= documentId %>">
         <input type="hidden" name="payment_method" value="paypal">
         <input type="hidden" name="language" value="<%= selectedLanguage %>">
+        <input type="hidden" name="paypal_order_id" id="paypal_order_id" value="">
       </form>
       <form id="unlock-metamask" method="post" action="/unlock">
         <input type="hidden" name="document_id" value="<%= documentId %>">
@@ -222,7 +223,11 @@
         <input type="hidden" name="language" value="<%= selectedLanguage %>">
       </form>
       <div class="actions">
-        <button type="button" id="pay-paypal" <%= documentId ? '' : 'disabled' %>><%= t('payment.paypalButton') %></button>
+        <% if (paymentConfig && paymentConfig.paypalEnabled) { %>
+          <div id="paypal-buttons" style="min-width:260px;"></div>
+        <% } else { %>
+          <button type="button" id="pay-paypal" <%= documentId ? '' : 'disabled' %>><%= t('payment.paypalButton') %></button>
+        <% } %>
         <button type="button" id="pay-metamask" <%= documentId ? '' : 'disabled' %>><%= t('payment.metamaskButton') %></button>
       </div>
     </div>
@@ -253,7 +258,14 @@
       connectingPayment: <%- JSON.stringify(t('client.connectingPayment')) %>,
       paymentAuthorized: <%- JSON.stringify(t('client.paymentAuthorized')) %>
     };
+
+    window.PAYMENT_CONFIG = <%- JSON.stringify(paymentConfig || {}) %>;
+    window.DOCUMENT_ID = <%- JSON.stringify(documentId || '') %>;
+    window.SELECTED_LANGUAGE = <%- JSON.stringify(selectedLanguage || 'en') %>;
   </script>
+  <% if (paymentConfig && paymentConfig.paypalEnabled) { %>
+    <script src="https://www.paypal.com/sdk/js?client-id=<%= encodeURIComponent(paymentConfig.paypalClientId) %>&currency=<%= encodeURIComponent(paymentConfig.paypalCurrency || 'EUR') %>&intent=capture"></script>
+  <% } %>
   <script src="/static/manuscript-validator.js"></script>
   <script src="/static/client.js"></script>
 </body>

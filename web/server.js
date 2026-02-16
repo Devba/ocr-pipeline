@@ -38,6 +38,13 @@ const FACE_ANTIBOT_ENABLED = process.env.FACE_ANTIBOT_ENABLED === '1';
 const FACE_ANTIBOT_TEST_MODE = process.env.FACE_ANTIBOT_TEST_MODE !== '0';
 const FACE_CHALLENGE_TTL_MS = Number(process.env.FACE_ANTIBOT_CHALLENGE_TTL_MS || 2 * 60 * 1000);
 const FACE_CHALLENGE_SECRET = String(process.env.FACE_ANTIBOT_SECRET || 'change-this-face-antibot-secret');
+const PAYPAL_ENV = String(process.env.PAYPAL_ENV || 'sandbox').toLowerCase();
+const PAYPAL_CLIENT_ID = String(process.env.PAYPAL_CLIENT_ID || '').trim();
+const PAYPAL_CLIENT_SECRET = String(process.env.PAYPAL_CLIENT_SECRET || '').trim();
+const PAYPAL_CURRENCY = String(process.env.PAYPAL_CURRENCY || 'EUR').toUpperCase();
+const PAYPAL_UNLOCK_AMOUNT = String(process.env.PAYPAL_UNLOCK_AMOUNT || '1.00');
+const PAYPAL_ENABLED = Boolean(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET);
+const PAYPAL_API_BASE = PAYPAL_ENV === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
 const LANGUAGE_COUNTRIES = {
   es: new Set(['ES', 'MX', 'AR', 'CO', 'PE', 'VE', 'CL', 'EC', 'GT', 'CU', 'BO', 'DO', 'HN', 'PY', 'SV', 'NI', 'CR', 'PA', 'UY']),
   pt: new Set(['PT', 'BR', 'AO', 'MZ', 'CV', 'GW', 'ST', 'TL']),
@@ -47,6 +54,34 @@ const LANGUAGE_COUNTRIES = {
 };
 const lastOcrAtByIp = new Map();
 const faceCheckChallenges = new Map();
+const paypalOrders = new Map();
+
+function isValidMoneyAmount(value) {
+  const normalized = String(value || '').trim();
+  return /^\d+(?:\.\d{1,2})?$/.test(normalized) && Number(normalized) > 0;
+}
+
+async function getPayPalAccessToken() {
+  const basic = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`, 'utf8').toString('base64');
+  const response = await fetch(`${PAYPAL_API_BASE}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${basic}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ grant_type: 'client_credentials' }),
+  });
+
+  if (!response.ok) {
+    throw new Error('PAYPAL_OAUTH_FAILED');
+  }
+
+  const data = await response.json();
+  if (!data?.access_token) {
+    throw new Error('PAYPAL_OAUTH_NO_TOKEN');
+  }
+  return String(data.access_token);
+}
 
 function normalizeLanguage(value) {
   if (!value) {
@@ -201,6 +236,7 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(BASE_DIR, 'templates'));
 app.set('trust proxy', true);
 app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '1mb' }));
 app.use(
   i18nextMiddleware.handle(i18next, {
     ignoreRoutes: ['/static'],
@@ -350,6 +386,14 @@ function buildViewModel(req, extra = {}) {
       faceChallengeEndpoint: '/face-check/challenge',
       faceChallengeTtlMs: FACE_CHALLENGE_TTL_MS,
     },
+    paymentConfig: {
+      paypalEnabled: PAYPAL_ENABLED,
+      paypalClientId: PAYPAL_CLIENT_ID,
+      paypalCurrency: PAYPAL_CURRENCY,
+      paypalUnlockAmount: PAYPAL_UNLOCK_AMOUNT,
+      paypalCreateOrderEndpoint: '/api/paypal/create-order',
+      paypalCaptureOrderEndpoint: '/api/paypal/capture-order',
+    },
     paymentMessage: '',
     ...extra,
   };
@@ -403,6 +447,117 @@ app.get('/face-check/challenge', (req, res) => {
 
   const { token, expiresAt } = issueFaceChallenge(req);
   return res.json({ ok: true, token, expiresAt });
+});
+
+app.post('/api/paypal/create-order', async (req, res) => {
+  const selectedLanguage = normalizeLanguage(req.body?.language || req.query?.lng || req.ipLanguage || req.language);
+
+  if (!PAYPAL_ENABLED) {
+    return res.status(400).json({ ok: false, error: i18next.t('errors.paypalNotConfigured', { lng: selectedLanguage }) });
+  }
+
+  const documentId = String(req.body?.document_id || '').trim();
+  if (!documentId || !mockDocuments.has(documentId)) {
+    return res.status(400).json({ ok: false, error: i18next.t('errors.documentNotFound', { lng: selectedLanguage }) });
+  }
+
+  if (!isValidMoneyAmount(PAYPAL_UNLOCK_AMOUNT)) {
+    return res.status(500).json({ ok: false, error: i18next.t('errors.invalidRequest', { lng: selectedLanguage }) });
+  }
+
+  try {
+    const accessToken = await getPayPalAccessToken();
+    const response = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        intent: 'CAPTURE',
+        purchase_units: [
+          {
+            reference_id: documentId,
+            amount: {
+              currency_code: PAYPAL_CURRENCY,
+              value: PAYPAL_UNLOCK_AMOUNT,
+            },
+            description: `Unlock document ${documentId}`,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      return res.status(502).json({ ok: false, error: i18next.t('errors.paypalOrderFailed', { lng: selectedLanguage }) });
+    }
+
+    const data = await response.json();
+    const orderId = String(data?.id || '').trim();
+    if (!orderId) {
+      return res.status(502).json({ ok: false, error: i18next.t('errors.paypalOrderFailed', { lng: selectedLanguage }) });
+    }
+
+    paypalOrders.set(orderId, {
+      documentId,
+      status: 'CREATED',
+      createdAt: Date.now(),
+      used: false,
+    });
+
+    return res.json({ ok: true, orderId });
+  } catch (_error) {
+    return res.status(502).json({ ok: false, error: i18next.t('errors.paypalOrderFailed', { lng: selectedLanguage }) });
+  }
+});
+
+app.post('/api/paypal/capture-order', async (req, res) => {
+  const selectedLanguage = normalizeLanguage(req.body?.language || req.query?.lng || req.ipLanguage || req.language);
+
+  if (!PAYPAL_ENABLED) {
+    return res.status(400).json({ ok: false, error: i18next.t('errors.paypalNotConfigured', { lng: selectedLanguage }) });
+  }
+
+  const orderId = String(req.body?.order_id || '').trim();
+  const documentId = String(req.body?.document_id || '').trim();
+  if (!orderId || !documentId) {
+    return res.status(400).json({ ok: false, error: i18next.t('errors.invalidRequest', { lng: selectedLanguage }) });
+  }
+
+  const local = paypalOrders.get(orderId);
+  if (!local || local.documentId !== documentId || local.used) {
+    return res.status(400).json({ ok: false, error: i18next.t('errors.paypalCaptureFailed', { lng: selectedLanguage }) });
+  }
+
+  try {
+    const accessToken = await getPayPalAccessToken();
+    const response = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+
+    if (!response.ok) {
+      return res.status(502).json({ ok: false, error: i18next.t('errors.paypalCaptureFailed', { lng: selectedLanguage }) });
+    }
+
+    const data = await response.json();
+    const status = String(data?.status || '');
+    if (status !== 'COMPLETED') {
+      return res.status(400).json({ ok: false, error: i18next.t('errors.paypalCaptureFailed', { lng: selectedLanguage }) });
+    }
+
+    local.status = 'CAPTURED';
+    local.capturedAt = Date.now();
+    paypalOrders.set(orderId, local);
+
+    return res.json({ ok: true });
+  } catch (_error) {
+    return res.status(502).json({ ok: false, error: i18next.t('errors.paypalCaptureFailed', { lng: selectedLanguage }) });
+  }
 });
 
 app.post('/', ocrLimiter, requestTimeoutMiddleware(45 * 1000), upload.single('image'), ocrCooldownMiddleware, async (req, res) => {
@@ -493,6 +648,20 @@ app.post('/unlock', (req, res) => {
       error: i18next.t('errors.documentNotFound', { lng: selectedLanguage }),
       selectedLanguage,
     });
+  }
+
+  if (paymentMethod === 'paypal' && PAYPAL_ENABLED) {
+    const orderId = String(req.body.paypal_order_id || '').trim();
+    const local = orderId ? paypalOrders.get(orderId) : null;
+    if (!orderId || !local || local.documentId !== documentId || local.status !== 'CAPTURED' || local.used) {
+      res.status(400);
+      return renderPage(req, res, {
+        error: i18next.t('errors.paypalCaptureFailed', { lng: selectedLanguage }),
+        selectedLanguage,
+      });
+    }
+    local.used = true;
+    paypalOrders.set(orderId, local);
   }
 
   const language = doc.language || selectedLanguage;
