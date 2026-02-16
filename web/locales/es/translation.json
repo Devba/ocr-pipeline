@@ -112,5 +112,6 @@
     "faceCheckError": "No se pudo completar el chequeo facial.",
     "connectingPayment": "Conectando con {{method}} (simulado)...",
     "paymentAuthorized": "Pago en {{method}} autorizado (simulado)."
+    ,"paymentSuccessTitle": "¡Gracias por tu compra!"
   }
 }

@@ -112,5 +112,6 @@
     "faceCheckError": "Could not complete face check.",
     "connectingPayment": "Connecting to {{method}} (simulated)...",
     "paymentAuthorized": "Payment in {{method}} authorized (simulated)."
+    ,"paymentSuccessTitle": "Thanks for your purchase!"
   }
 }

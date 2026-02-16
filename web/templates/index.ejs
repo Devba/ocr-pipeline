@@ -262,9 +262,14 @@
     window.PAYMENT_CONFIG = <%- JSON.stringify(paymentConfig || {}) %>;
     window.DOCUMENT_ID = <%- JSON.stringify(documentId || '') %>;
     window.SELECTED_LANGUAGE = <%- JSON.stringify(selectedLanguage || 'en') %>;
+    window.PAYMENT_SUCCESS_MESSAGE = <%- JSON.stringify(paymentMessage || '') %>;
+    window.PAYMENT_SUCCESS_TITLE = <%- JSON.stringify(t('client.paymentSuccessTitle')) %>;
   </script>
   <% if (paymentConfig && paymentConfig.paypalEnabled) { %>
     <script src="https://www.paypal.com/sdk/js?client-id=<%= encodeURIComponent(paymentConfig.paypalClientId) %>&currency=<%= encodeURIComponent(paymentConfig.paypalCurrency || 'EUR') %>&intent=capture"></script>
+  <% } %>
+  <% if (paymentMessage) { %>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <% } %>
   <script src="/static/manuscript-validator.js"></script>
   <script src="/static/client.js"></script>

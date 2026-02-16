@@ -112,5 +112,6 @@
     "faceCheckError": "无法完成人脸检测。",
     "connectingPayment": "正在连接 {{method}}（模拟）...",
     "paymentAuthorized": "{{method}} 支付已授权（模拟）。"
+    ,"paymentSuccessTitle": "感谢你的购买！"
   }
 }

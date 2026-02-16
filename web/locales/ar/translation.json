@@ -112,5 +112,6 @@
     "faceCheckError": "تعذر إكمال فحص الوجه.",
     "connectingPayment": "جارٍ الاتصال بـ {{method}} (محاكاة)...",
     "paymentAuthorized": "تمت الموافقة على الدفع عبر {{method}} (محاكاة)."
+    ,"paymentSuccessTitle": "شكرًا لشرائك!"
   }
 }

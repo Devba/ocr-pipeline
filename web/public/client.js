@@ -36,6 +36,33 @@
   const paymentConfig = window.PAYMENT_CONFIG || {};
   const documentIdFromPage = window.DOCUMENT_ID || '';
   const selectedLanguageFromPage = window.SELECTED_LANGUAGE || (languageSelect ? languageSelect.value : 'en');
+  const paymentSuccessMessage = window.PAYMENT_SUCCESS_MESSAGE || '';
+  const paymentSuccessTitle = window.PAYMENT_SUCCESS_TITLE || '¡Gracias!';
+
+  (function showPaymentSuccessOnce() {
+    if (!paymentSuccessMessage) {
+      return;
+    }
+    if (!window.Swal || typeof window.Swal.fire !== 'function') {
+      return;
+    }
+    try {
+      const key = `paymentSuccessShown:${documentIdFromPage || 'unknown'}`;
+      if (window.sessionStorage && sessionStorage.getItem(key) === '1') {
+        return;
+      }
+      window.Swal.fire({
+        icon: 'success',
+        title: paymentSuccessTitle,
+        text: paymentSuccessMessage,
+        confirmButtonText: 'OK',
+      });
+      if (window.sessionStorage) {
+        sessionStorage.setItem(key, '1');
+      }
+    } catch (_error) {
+    }
+  })();
 
   async function requestFaceCheckToken() {
     const url = new URL(faceChallengeEndpoint, window.location.origin);
