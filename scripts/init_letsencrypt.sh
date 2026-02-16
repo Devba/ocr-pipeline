@@ -40,7 +40,7 @@ echo "== Arrancando Nginx para desafío ACME =="
 docker compose up -d nginx
 
 echo "== Solicitando certificado real (Let's Encrypt) =="
-docker compose run --rm certbot certonly \
+docker compose run --rm --entrypoint certbot certbot certonly \
   --webroot -w /var/www/certbot \
   --email "$EMAIL" \
   --agree-tos \
