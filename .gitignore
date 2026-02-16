@@ -1,5 +1,6 @@
 .venv/
 venv/
+.venv-docai/
 __pycache__/
 *.pyc
 
@@ -8,6 +9,8 @@ web/node_modules/
 
 web/data/uploads/
 web/data/work/
+
+ocr_docai/
 
 .env
 .env.*

@@ -156,6 +156,21 @@ python3 scripts/docai_ocr.py \
   --processor_id TU_PROCESSOR_ID
 ```
 
+Atajo (prepara venv + ejecuta OCR + CER si hay GT):
+
+```bash
+bash scripts/run_docai_pilot.sh
+```
+
+Variables opcionales:
+
+```bash
+DOC_AI_PROJECT_ID=TU_PROJECT_ID \
+DOC_AI_LOCATION=us \
+DOC_AI_PROCESSOR_ID=TU_PROCESSOR_ID \
+bash scripts/run_docai_pilot.sh
+```
+
 Opcional: fijar version del procesador
 
 ```bash
