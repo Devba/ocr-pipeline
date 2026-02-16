@@ -10,6 +10,7 @@ const i18nextMiddleware = require('i18next-http-middleware');
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const sharp = require('sharp');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -45,6 +46,15 @@ const PAYPAL_CURRENCY = String(process.env.PAYPAL_CURRENCY || 'EUR').toUpperCase
 const PAYPAL_UNLOCK_AMOUNT = String(process.env.PAYPAL_UNLOCK_AMOUNT || '1.00');
 const PAYPAL_ENABLED = Boolean(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET);
 const PAYPAL_API_BASE = PAYPAL_ENV === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+
+const OPENCLAW_WEBHOOK_SECRET = String(process.env.OPENCLAW_WEBHOOK_SECRET || '').trim();
+const SMTP_HOST = String(process.env.SMTP_HOST || '').trim();
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_SECURE = String(process.env.SMTP_SECURE || '').trim() === '1';
+const SMTP_USER = String(process.env.SMTP_USER || '').trim();
+const SMTP_PASS = String(process.env.SMTP_PASS || '').trim();
+const SMTP_FROM = String(process.env.SMTP_FROM || '').trim();
+const ALERT_EMAIL_TO = String(process.env.ALERT_EMAIL_TO || '').trim();
 const LANGUAGE_COUNTRIES = {
   es: new Set(['ES', 'MX', 'AR', 'CO', 'PE', 'VE', 'CL', 'EC', 'GT', 'CU', 'BO', 'DO', 'HN', 'PY', 'SV', 'NI', 'CR', 'PA', 'UY']),
   pt: new Set(['PT', 'BR', 'AO', 'MZ', 'CV', 'GW', 'ST', 'TL']),
@@ -230,6 +240,43 @@ function detectLanguageFromCountry(countryCode) {
 
 function resolveLanguage(req) {
   return normalizeLanguage(req.body?.language || req.query?.lng || req.ipLanguage || req.language);
+}
+
+function extractBearerToken(req) {
+  const auth = String(req.headers.authorization || '').trim();
+  if (auth.toLowerCase().startsWith('bearer ')) {
+    return auth.slice(7).trim();
+  }
+  const q = req.query?.token;
+  return q ? String(q).trim() : '';
+}
+
+function createSmtpTransportIfConfigured() {
+  if (!SMTP_HOST || !SMTP_PORT || !SMTP_FROM || !ALERT_EMAIL_TO) {
+    return null;
+  }
+
+  const auth = SMTP_USER && SMTP_PASS ? { user: SMTP_USER, pass: SMTP_PASS } : undefined;
+  return nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_SECURE,
+    auth,
+  });
+}
+
+async function sendAlertEmail(subject, text) {
+  const transport = createSmtpTransportIfConfigured();
+  if (!transport) {
+    throw new Error('SMTP_NOT_CONFIGURED');
+  }
+
+  await transport.sendMail({
+    from: SMTP_FROM,
+    to: ALERT_EMAIL_TO,
+    subject,
+    text,
+  });
 }
 
 function tLang(req, key, options = {}) {
@@ -608,6 +655,33 @@ function requestTimeoutMiddleware(timeoutMs) {
 
 app.get('/', (req, res) => {
   renderPage(req, res);
+});
+
+app.post('/ops/openclaw/webhook', async (req, res) => {
+  if (!OPENCLAW_WEBHOOK_SECRET) {
+    return res.status(404).json({ ok: false });
+  }
+
+  const token = extractBearerToken(req);
+  if (!token || token !== OPENCLAW_WEBHOOK_SECRET) {
+    return res.status(401).json({ ok: false, error: 'unauthorized' });
+  }
+
+  const payload = req.body;
+  const jobId = payload?.jobId || payload?.id || payload?.cronJobId || '';
+  const name = payload?.name || payload?.jobName || 'OpenClaw';
+  const ok = payload?.ok;
+  const status = typeof ok === 'boolean' ? (ok ? 'OK' : 'ERROR') : String(payload?.status || 'EVENT');
+
+  const subject = `[OpenClaw] ${name} ${status}${jobId ? ` (${jobId})` : ''}`;
+  const text = JSON.stringify(payload, null, 2);
+
+  try {
+    await sendAlertEmail(subject, text);
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error?.message || 'send_failed' });
+  }
 });
 
 function extractAdminToken(req) {
