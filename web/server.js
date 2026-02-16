@@ -218,6 +218,10 @@ const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => getClientIp(req),
+  skip: (req) => {
+    const method = String(req.method || '').toUpperCase();
+    return method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+  },
   handler: (req, res) => {
     res.status(429);
     return renderPage(req, res, {
