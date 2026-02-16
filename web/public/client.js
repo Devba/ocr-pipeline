@@ -9,7 +9,6 @@
   const faceCheckTokenInput = document.getElementById('face_check_token');
   const testFaceCheckButton = document.getElementById('test-face-check');
   const statusNode = document.getElementById('client-status');
-  const paypalButton = document.getElementById('pay-paypal');
   const paypalButtonsContainer = document.getElementById('paypal-buttons');
   const metamaskButton = document.getElementById('pay-metamask');
   const paypalForm = document.getElementById('unlock-paypal');
@@ -339,7 +338,6 @@
   function setupPayPalSmartButtons() {
     const enabled = paymentConfig && paymentConfig.paypalEnabled === true;
     if (!enabled) {
-      simulatePayment(paypalButton, paypalForm, 'PayPal');
       return;
     }
 
@@ -353,6 +351,12 @@
     }
 
     window.paypal.Buttons({
+      style: {
+        layout: 'vertical',
+        color: 'gold',
+        shape: 'rect',
+        label: 'paypal',
+      },
       createOrder: async () => {
         const response = await fetch(paymentConfig.paypalCreateOrderEndpoint || '/api/paypal/create-order', {
           method: 'POST',
@@ -399,6 +403,9 @@
         if (paypalForm) {
           paypalForm.submit();
         }
+      },
+      onCancel: () => {
+        setStatus('Pago cancelado.', true);
       },
       onError: (err) => {
         const message = err && err.message ? String(err.message) : 'Error PayPal.';

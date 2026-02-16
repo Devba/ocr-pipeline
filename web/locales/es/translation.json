@@ -69,7 +69,7 @@
   "payment": {
     "paypalLabel": "PayPal",
     "metamaskLabel": "MetaMask",
-    "paypalButton": "Pagar con PayPal (simulado)",
+    "paypalButton": "Pagar con PayPal",
     "metamaskButton": "Pagar con MetaMask (simulado)"
   },
   "messages": {

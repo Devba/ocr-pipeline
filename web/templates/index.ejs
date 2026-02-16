@@ -226,7 +226,7 @@
         <% if (paymentConfig && paymentConfig.paypalEnabled) { %>
           <div id="paypal-buttons" style="min-width:260px;"></div>
         <% } else { %>
-          <button type="button" id="pay-paypal" <%= documentId ? '' : 'disabled' %>><%= t('payment.paypalButton') %></button>
+          <p style="margin:0;"><%= t('errors.paypalNotConfigured') %></p>
         <% } %>
         <button type="button" id="pay-metamask" <%= documentId ? '' : 'disabled' %>><%= t('payment.metamaskButton') %></button>
       </div>
