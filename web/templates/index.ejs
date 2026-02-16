@@ -151,7 +151,19 @@
 
   <form id="ocr-form" method="post" enctype="multipart/form-data">
     <label for="image"><%= t('ui.imageLabel') %></label><br>
-    <input type="file" id="image" name="image" accept=".png,.jpg,.jpeg,.tif,.tiff" required>
+    <input type="file" id="image" name="image" accept="image/*" capture="environment" required>
+
+    <div style="margin-top:0.6rem;">
+      <button type="button" id="take-photo"><%= t('ui.takePhotoButton') %></button>
+    </div>
+
+    <div id="photo-capture" style="display:none; margin-top:0.8rem;">
+      <video id="photo-video" style="width:100%; max-height:55vh; background:#000; border-radius:8px;" playsinline></video>
+      <div class="actions" style="margin-top:0.6rem;">
+        <button type="button" id="capture-photo"><%= t('ui.capturePhotoButton') %></button>
+        <button type="button" id="cancel-photo"><%= t('ui.cancelPhotoButton') %></button>
+      </div>
+    </div>
     <input type="hidden" id="client_preprocessed" name="client_preprocessed" value="0">
     <input type="text" name="website_url" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px;opacity:0;pointer-events:none;" aria-hidden="true">
 
@@ -242,6 +254,10 @@
     };
     window.UI_TRANSLATIONS = {
       unsupportedFormat: <%- JSON.stringify(t('client.unsupportedFormat')) %>,
+      cameraStart: <%- JSON.stringify(t('client.cameraStart')) %>,
+      cameraNoSupport: <%- JSON.stringify(t('client.cameraNoSupport')) %>,
+      cameraPermission: <%- JSON.stringify(t('client.cameraPermission')) %>,
+      cameraCaptureFailed: <%- JSON.stringify(t('client.cameraCaptureFailed')) %>,
       preprocessing: <%- JSON.stringify(t('client.preprocessing')) %>,
       preprocessingReady: <%- JSON.stringify(t('client.preprocessingReady')) %>,
       preprocessingError: <%- JSON.stringify(t('client.preprocessingError')) %>,

@@ -14,6 +14,11 @@
   const paypalForm = document.getElementById('unlock-paypal');
   const metamaskForm = document.getElementById('unlock-metamask');
   const paypalOrderIdInput = document.getElementById('paypal_order_id');
+  const takePhotoButton = document.getElementById('take-photo');
+  const photoCaptureNode = document.getElementById('photo-capture');
+  const photoVideo = document.getElementById('photo-video');
+  const capturePhotoButton = document.getElementById('capture-photo');
+  const cancelPhotoButton = document.getElementById('cancel-photo');
 
   if (!form || !fileInput || !profileSelect || !languageSelect || !clientPreprocessCheckbox || !clientPreprocessedInput || !statusNode) {
     return;
@@ -30,8 +35,97 @@
     return ui[key] || fallback;
   }
 
-  const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff']);
+  const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.heic', '.heif']);
   let lastFaceCheckAt = 0;
+  let photoStream = null;
+
+  async function startPhotoCapture() {
+    setStatus(t('cameraStart', 'Abriendo cámara...'), false);
+
+    if (!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function')) {
+      setStatus(t('cameraNoSupport', 'Tu navegador no permite abrir la cámara desde la web. Usa el selector de archivos.'), true);
+      return;
+    }
+
+    if (!photoCaptureNode || !photoVideo) {
+      return;
+    }
+
+    try {
+      if (photoStream) {
+        photoStream.getTracks().forEach((track) => track.stop());
+        photoStream = null;
+      }
+
+      photoStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+
+      photoVideo.srcObject = photoStream;
+      photoVideo.playsInline = true;
+      await photoVideo.play();
+
+      photoCaptureNode.style.display = '';
+    } catch (_error) {
+      setStatus(t('cameraPermission', 'No se pudo acceder a la cámara. Revisa permisos del navegador.'), true);
+      stopPhotoCapture();
+    }
+  }
+
+  function stopPhotoCapture() {
+    if (photoVideo) {
+      try {
+        photoVideo.pause();
+      } catch (_error) {
+      }
+      photoVideo.srcObject = null;
+    }
+    if (photoStream) {
+      photoStream.getTracks().forEach((track) => track.stop());
+      photoStream = null;
+    }
+    if (photoCaptureNode) {
+      photoCaptureNode.style.display = 'none';
+    }
+  }
+
+  async function captureCurrentFrameToFile() {
+    if (!photoVideo) {
+      return;
+    }
+
+    const width = Math.max(1, photoVideo.videoWidth || 0);
+    const height = Math.max(1, photoVideo.videoHeight || 0);
+    if (!width || !height) {
+      setStatus(t('cameraCaptureFailed', 'No se pudo capturar la foto. Intenta de nuevo.'), true);
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      setStatus(t('cameraCaptureFailed', 'No se pudo capturar la foto. Intenta de nuevo.'), true);
+      return;
+    }
+    ctx.drawImage(photoVideo, 0, 0, width, height);
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    if (!blob) {
+      setStatus(t('cameraCaptureFailed', 'No se pudo capturar la foto. Intenta de nuevo.'), true);
+      return;
+    }
+
+    const file = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    fileInput.files = dataTransfer.files;
+
+    stopPhotoCapture();
+    setStatus('', false);
+  }
 
   const paymentConfig = window.PAYMENT_CONFIG || {};
   const documentIdFromPage = window.DOCUMENT_ID || '';
@@ -181,6 +275,31 @@
     }
   }
 
+  if (takePhotoButton) {
+    takePhotoButton.addEventListener('click', async () => {
+      takePhotoButton.disabled = true;
+      await startPhotoCapture();
+      takePhotoButton.disabled = false;
+    });
+  }
+  if (capturePhotoButton) {
+    capturePhotoButton.addEventListener('click', async () => {
+      capturePhotoButton.disabled = true;
+      await captureCurrentFrameToFile();
+      capturePhotoButton.disabled = false;
+    });
+  }
+  if (cancelPhotoButton) {
+    cancelPhotoButton.addEventListener('click', () => {
+      stopPhotoCapture();
+      setStatus('', false);
+    });
+  }
+
+  window.addEventListener('pagehide', () => {
+    stopPhotoCapture();
+  });
+
   async function detectLikelyPrintedText(file) {
     if (!validatorCore || typeof validatorCore.analyzeImageData !== 'function') {
       return { likelyPrinted: false, confidence: 0 };
@@ -288,7 +407,16 @@
     }
 
     const ext = getExtension(file.name);
-    if (!allowedExtensions.has(ext)) {
+    const mime = String(file.type || '').toLowerCase();
+    const looksLikeImage = mime.startsWith('image/');
+
+    if (ext) {
+      if (!allowedExtensions.has(ext)) {
+        event.preventDefault();
+        setStatus(t('unsupportedFormat', 'Formato no permitido. Usa PNG, JPG, JPEG, TIF o TIFF.'), true);
+        return;
+      }
+    } else if (!looksLikeImage) {
       event.preventDefault();
       setStatus(t('unsupportedFormat', 'Formato no permitido. Usa PNG, JPG, JPEG, TIF o TIFF.'), true);
       return;

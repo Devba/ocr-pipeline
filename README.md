@@ -94,6 +94,22 @@ Luego:
 - App: `https://manuscritos.live`
 - Renovación de certificados: se hace sola por el servicio `certbot`.
 
+## Estado actual (Feb 2026)
+
+- Producción en `manuscritos.live` con Docker Compose + Nginx + Let's Encrypt.
+- i18n con 6 idiomas (ES/EN/PT/FR/ZH/AR) y RTL para árabe.
+- Medidas anti-bot app-layer: rate limit, cooldown OCR, honeypot y límites de subida.
+- Anti-bot opcional por cámara (desactivado por defecto) con challenge firmado.
+- PayPal Sandbox integrado (crear orden + capturar + desbloquear) en backend.
+- Piloto de OCR con Google Document AI (scripts en `scripts/docai_ocr.py`).
+
+## Móvil: tomar foto y subir
+
+En móvil, el selector de archivo abre la cámara (modo "documento") cuando el navegador lo soporta (usa `accept="image/*"` + `capture="environment"`).
+
+- Se aceptan formatos: PNG/JPG/TIF y también HEIC/HEIF (común en iPhone).
+- En Docker, se instala `libheif1` para que `sharp` pueda decodificar HEIC/HEIF.
+
 ### Notas
 
 - Perfil **Histórico** aplica preprocesado más agresivo para manuscritos antiguos.

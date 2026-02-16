@@ -20,7 +20,7 @@ const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const WORK_DIR = path.join(DATA_DIR, 'work');
 const LOCALES_DIR = path.join(BASE_DIR, 'locales');
 
-const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff']);
+const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.heic', '.heif']);
 const mockDocuments = new Map();
 const SUPPORTED_LANGUAGES = ['es', 'en', 'pt', 'fr', 'zh', 'ar'];
 const LANGUAGE_OPTIONS = [
@@ -302,7 +302,14 @@ const upload = multer({
   },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    if (!ALLOWED_EXTENSIONS.has(ext)) {
+    const mime = String(file.mimetype || '').toLowerCase();
+    const looksLikeImage = mime.startsWith('image/');
+
+    if (ext) {
+      if (!ALLOWED_EXTENSIONS.has(ext)) {
+        return cb(new Error(req.t('errors.unsupportedFormat')));
+      }
+    } else if (!looksLikeImage) {
       return cb(new Error(req.t('errors.unsupportedFormat')));
     }
     cb(null, true);
