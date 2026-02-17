@@ -1393,8 +1393,8 @@ app.post('/auth/email/start', async (req, res) => {
     return renderLogin(req, res, { error: i18next.t('errors.invalidRequest', { lng }) });
   }
 
-  if (!SMTP_HOST || !SMTP_PORT || !SMTP_FROM) {
-    return renderLogin(req, res, { error: 'SMTP not configured.' });
+  if (!SMTP_HOST || !SMTP_PORT || !SMTP_FROM || !SMTP_USER || !SMTP_PASS) {
+    return renderLogin(req, res, { error: 'SMTP not configured (missing host/port/from/user/pass).' });
   }
 
   const state = await loadAuthState();
@@ -1425,14 +1425,31 @@ app.post('/auth/email/start', async (req, res) => {
     if (!transport) {
       throw new Error('SMTP_NOT_CONFIGURED');
     }
+
+    try {
+      await transport.verify();
+    } catch (error) {
+      console.error('[auth] smtp verify failed:', {
+        message: String(error?.message || ''),
+        code: error?.code,
+        responseCode: error?.responseCode,
+      });
+      throw error;
+    }
+
     await transport.sendMail({
       from: SMTP_FROM,
       to: email,
       subject: 'Login link - manuscritos.live',
       text: `Login link (valid for ~${Math.round(AUTH_MAGICLINK_TTL_MS / 60000)} minutes):\n\n${link.toString()}\n`,
     });
-  } catch (_error) {
-    return renderLogin(req, res, { error: 'Could not send email.' });
+  } catch (error) {
+    console.error('[auth] email send failed:', {
+      message: String(error?.message || ''),
+      code: error?.code,
+      responseCode: error?.responseCode,
+    });
+    return renderLogin(req, res, { error: 'Could not send email. Check SMTP settings.' });
   }
 
   return renderLogin(req, res, { info: 'Check your email for the login link.' });
