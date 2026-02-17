@@ -13,6 +13,7 @@ const sharp = require('sharp');
 const nodemailer = require('nodemailer');
 const { v1: docAiV1 } = require('@google-cloud/documentai');
 const { GoogleAuth } = require('google-auth-library');
+const { ethers } = require('ethers');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -23,6 +24,15 @@ const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const WORK_DIR = path.join(DATA_DIR, 'work');
 const JOBS_DIR = path.join(DATA_DIR, 'jobs');
 const LOCALES_DIR = path.join(BASE_DIR, 'locales');
+
+const AUTH_DIR = path.join(DATA_DIR, 'auth');
+const AUTH_STATE_PATH = path.join(AUTH_DIR, 'state.json');
+
+const AUTH_COOKIE_NAME = String(process.env.AUTH_COOKIE_NAME || 'mscr_session').trim();
+const AUTH_SESSION_TTL_MS = Number(process.env.AUTH_SESSION_TTL_MS || 14 * 24 * 60 * 60 * 1000);
+const AUTH_MAGICLINK_TTL_MS = Number(process.env.AUTH_MAGICLINK_TTL_MS || 15 * 60 * 1000);
+const AUTH_METAMASK_NONCE_TTL_MS = Number(process.env.AUTH_METAMASK_NONCE_TTL_MS || 10 * 60 * 1000);
+const AUTH_TOKEN_SECRET = String(process.env.AUTH_TOKEN_SECRET || FACE_CHALLENGE_SECRET).trim();
 
 const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.heic', '.heif', '.pdf']);
 const mockDocuments = new Map();
@@ -487,7 +497,7 @@ function extractBearerToken(req) {
 }
 
 function createSmtpTransportIfConfigured() {
-  if (!SMTP_HOST || !SMTP_PORT || !SMTP_FROM || !ALERT_EMAIL_TO) {
+  if (!SMTP_HOST || !SMTP_PORT) {
     return null;
   }
 
@@ -504,6 +514,10 @@ async function sendAlertEmail(subject, text) {
   const transport = createSmtpTransportIfConfigured();
   if (!transport) {
     throw new Error('SMTP_NOT_CONFIGURED');
+  }
+
+  if (!SMTP_FROM || !ALERT_EMAIL_TO) {
+    throw new Error('SMTP_ALERT_TARGET_NOT_CONFIGURED');
   }
 
   await transport.sendMail({
@@ -764,6 +778,143 @@ async function ensureDirs() {
   await fs.mkdir(UPLOADS_DIR, { recursive: true });
   await fs.mkdir(WORK_DIR, { recursive: true });
   await fs.mkdir(JOBS_DIR, { recursive: true });
+  await fs.mkdir(AUTH_DIR, { recursive: true });
+}
+
+async function loadAuthState() {
+  try {
+    const raw = await fs.readFile(AUTH_STATE_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    return {
+      users: parsed?.users && typeof parsed.users === 'object' ? parsed.users : {},
+      sessions: parsed?.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
+      magicLinks: parsed?.magicLinks && typeof parsed.magicLinks === 'object' ? parsed.magicLinks : {},
+      metamaskNonces: parsed?.metamaskNonces && typeof parsed.metamaskNonces === 'object' ? parsed.metamaskNonces : {},
+    };
+  } catch (_error) {
+    return { users: {}, sessions: {}, magicLinks: {}, metamaskNonces: {} };
+  }
+}
+
+async function saveAuthState(state) {
+  const safe = {
+    users: state?.users && typeof state.users === 'object' ? state.users : {},
+    sessions: state?.sessions && typeof state.sessions === 'object' ? state.sessions : {},
+    magicLinks: state?.magicLinks && typeof state.magicLinks === 'object' ? state.magicLinks : {},
+    metamaskNonces: state?.metamaskNonces && typeof state.metamaskNonces === 'object' ? state.metamaskNonces : {},
+  };
+  const tmpPath = `${AUTH_STATE_PATH}.tmp`;
+  await fs.writeFile(tmpPath, JSON.stringify(safe, null, 2) + '\n', 'utf8');
+  await fs.rename(tmpPath, AUTH_STATE_PATH);
+}
+
+function parseCookies(header) {
+  const value = String(header || '');
+  const out = {};
+  value.split(';').forEach((part) => {
+    const [k, ...rest] = part.trim().split('=');
+    if (!k) return;
+    out[k] = decodeURIComponent(rest.join('=') || '');
+  });
+  return out;
+}
+
+function buildSetCookie(name, value, options = {}) {
+  const parts = [`${name}=${encodeURIComponent(String(value || ''))}`];
+  const maxAge = options.maxAge;
+  if (typeof maxAge === 'number') {
+    parts.push(`Max-Age=${Math.max(0, Math.floor(maxAge / 1000))}`);
+  }
+  parts.push('Path=/');
+  parts.push('HttpOnly');
+  parts.push('SameSite=Lax');
+  if (options.secure !== false) {
+    parts.push('Secure');
+  }
+  return parts.join('; ');
+}
+
+function randomId(bytes = 18) {
+  return crypto.randomBytes(bytes).toString('base64url');
+}
+
+function hashToken(token) {
+  return crypto.createHmac('sha256', AUTH_TOKEN_SECRET || 'auth-secret')
+    .update(String(token || ''))
+    .digest('hex');
+}
+
+async function createSession(res, userId) {
+  const state = await loadAuthState();
+  const sessionId = randomId(24);
+  const now = Date.now();
+  state.sessions[sessionId] = {
+    userId: String(userId),
+    createdAt: now,
+    expiresAt: now + AUTH_SESSION_TTL_MS,
+  };
+  await saveAuthState(state);
+  res.setHeader('Set-Cookie', buildSetCookie(AUTH_COOKIE_NAME, sessionId, { maxAge: AUTH_SESSION_TTL_MS }));
+  return sessionId;
+}
+
+async function clearSession(res, sessionId) {
+  if (sessionId) {
+    const state = await loadAuthState();
+    delete state.sessions[String(sessionId)];
+    await saveAuthState(state);
+  }
+  res.setHeader('Set-Cookie', buildSetCookie(AUTH_COOKIE_NAME, '', { maxAge: 0 }));
+}
+
+async function getUserFromRequest(req) {
+  const cookies = parseCookies(req.headers?.cookie);
+  const sessionId = cookies[AUTH_COOKIE_NAME];
+  if (!sessionId) {
+    return null;
+  }
+
+  const state = await loadAuthState();
+  const session = state.sessions?.[sessionId];
+  if (!session) {
+    return null;
+  }
+  const now = Date.now();
+  if (session.expiresAt && now > Number(session.expiresAt)) {
+    delete state.sessions[sessionId];
+    await saveAuthState(state);
+    return null;
+  }
+  const user = state.users?.[session.userId];
+  return user ? { id: session.userId, ...user } : null;
+}
+
+function normalizeEmail(value) {
+  const email = String(value || '').trim().toLowerCase();
+  if (!email || email.length > 200) return '';
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return '';
+  return email;
+}
+
+function normalizeEthAddress(value) {
+  const raw = String(value || '').trim();
+  try {
+    return ethers.getAddress(raw);
+  } catch (_error) {
+    return '';
+  }
+}
+
+function requireAuth(req, res, next) {
+  getUserFromRequest(req)
+    .then((user) => {
+      if (!user) {
+        return res.redirect('/login');
+      }
+      req.currentUser = user;
+      next();
+    })
+    .catch(() => res.redirect('/login'));
 }
 
 async function pathExists(filePath) {
@@ -804,6 +955,7 @@ async function persistJob({
   summaryText,
   fullText,
   fullTextRaw,
+  userId,
   language,
   profile,
   psm,
@@ -852,6 +1004,7 @@ async function persistJob({
     psm: String(psm || ''),
     clientPreprocessed: Boolean(clientPreprocessed),
     postprocess: postprocess || null,
+    userId: userId ? String(userId) : '',
     ip: String(ipHash || ''),
     upload: uploadedFile ? {
       originalName: String(uploadedFile.originalname || ''),
@@ -1076,12 +1229,64 @@ function buildViewModel(req, extra = {}) {
     },
     simulatePaymentEnabled: SIMULATE_PAYMENT_ENABLED,
     paymentMessage: '',
+    currentUser: req.currentUser || null,
     ...extra,
   };
 }
 
 function renderPage(req, res, extra = {}) {
   return res.render('index', buildViewModel(req, extra));
+}
+
+function renderLogin(req, res, extra = {}) {
+  const currentLanguage = normalizeLanguage(req.query?.lng || req.body?.language || req.ipLanguage || req.language);
+  const t = (key, options = {}) => req.t(key, { lng: currentLanguage, ...options });
+  return res.render('login', {
+    t,
+    currentLanguage,
+    isRtl: RTL_LANGUAGES.has(currentLanguage),
+    error: '',
+    info: '',
+    ...extra,
+  });
+}
+
+function renderGallery(req, res, extra = {}) {
+  const currentLanguage = normalizeLanguage(req.query?.lng || req.body?.language || req.ipLanguage || req.language);
+  const t = (key, options = {}) => req.t(key, { lng: currentLanguage, ...options });
+  return res.render('gallery', {
+    t,
+    currentLanguage,
+    isRtl: RTL_LANGUAGES.has(currentLanguage),
+    currentUser: req.currentUser || null,
+    jobs: [],
+    ...extra,
+  });
+}
+
+async function listJobsForUser(userId, limit = 50) {
+  const safeLimit = Math.max(1, Math.min(200, Number(limit) || 50));
+  const entries = await fs.readdir(JOBS_DIR, { withFileTypes: true }).catch(() => []);
+  const jobs = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const jobId = entry.name;
+    if (!safeJobId(jobId)) continue;
+    const metaPath = path.join(JOBS_DIR, jobId, 'meta.json');
+    try {
+      const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+      if (String(meta?.userId || '') !== String(userId)) continue;
+      jobs.push({
+        id: jobId,
+        createdAt: meta?.createdAt || '',
+        engine: meta?.engine || '',
+        language: meta?.language || '',
+      });
+    } catch (_error) {
+    }
+  }
+  jobs.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  return jobs.slice(0, safeLimit);
 }
 
 function ocrCooldownMiddleware(req, res, next) {
@@ -1121,7 +1326,227 @@ function requestTimeoutMiddleware(timeoutMs) {
 }
 
 app.get('/', (req, res) => {
-  renderPage(req, res);
+  getUserFromRequest(req)
+    .then((user) => {
+      req.currentUser = user;
+      renderPage(req, res);
+    })
+    .catch(() => renderPage(req, res));
+});
+
+app.get('/login', async (req, res) => {
+  const user = await getUserFromRequest(req).catch(() => null);
+  if (user) {
+    return res.redirect('/gallery');
+  }
+  return renderLogin(req, res);
+});
+
+app.post('/logout', async (req, res) => {
+  const cookies = parseCookies(req.headers?.cookie);
+  const sessionId = cookies[AUTH_COOKIE_NAME];
+  await clearSession(res, sessionId);
+  return res.redirect('/');
+});
+
+app.post('/auth/email/start', async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  const lng = normalizeLanguage(req.body?.language || req.query?.lng || req.ipLanguage || req.language);
+  if (!email) {
+    return renderLogin(req, res, { error: i18next.t('errors.invalidRequest', { lng }) });
+  }
+
+  if (!SMTP_HOST || !SMTP_PORT || !SMTP_FROM) {
+    return renderLogin(req, res, { error: 'SMTP not configured.' });
+  }
+
+  const state = await loadAuthState();
+  let userId = Object.keys(state.users).find((id) => state.users[id]?.email === email);
+  if (!userId) {
+    userId = randomId(12);
+    state.users[userId] = { email, createdAt: Date.now() };
+  }
+
+  const token = randomId(24);
+  const tokenHash = hashToken(token);
+  state.magicLinks[tokenHash] = {
+    userId,
+    email,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + AUTH_MAGICLINK_TTL_MS,
+    used: false,
+  };
+
+  await saveAuthState(state);
+
+  const link = new URL('/auth/email/callback', `${req.protocol}://${req.get('host')}`);
+  link.searchParams.set('token', token);
+  link.searchParams.set('lng', lng);
+
+  try {
+    const transport = createSmtpTransportIfConfigured();
+    if (!transport) {
+      throw new Error('SMTP_NOT_CONFIGURED');
+    }
+    await transport.sendMail({
+      from: SMTP_FROM,
+      to: email,
+      subject: 'Login link - manuscritos.live',
+      text: `Login link (valid for ~${Math.round(AUTH_MAGICLINK_TTL_MS / 60000)} minutes):\n\n${link.toString()}\n`,
+    });
+  } catch (_error) {
+    return renderLogin(req, res, { error: 'Could not send email.' });
+  }
+
+  return renderLogin(req, res, { info: 'Check your email for the login link.' });
+});
+
+app.get('/auth/email/callback', async (req, res) => {
+  const token = String(req.query?.token || '').trim();
+  const lng = normalizeLanguage(req.query?.lng || req.ipLanguage || req.language);
+  if (!token) {
+    return renderLogin(req, res, { error: i18next.t('errors.invalidRequest', { lng }) });
+  }
+
+  const state = await loadAuthState();
+  const tokenHash = hashToken(token);
+  const entry = state.magicLinks?.[tokenHash];
+  if (!entry || entry.used) {
+    return renderLogin(req, res, { error: i18next.t('errors.invalidRequest', { lng }) });
+  }
+  if (entry.expiresAt && Date.now() > Number(entry.expiresAt)) {
+    delete state.magicLinks[tokenHash];
+    await saveAuthState(state);
+    return renderLogin(req, res, { error: i18next.t('errors.invalidRequest', { lng }) });
+  }
+
+  entry.used = true;
+  state.magicLinks[tokenHash] = entry;
+  await saveAuthState(state);
+
+  await createSession(res, entry.userId);
+  return res.redirect('/gallery');
+});
+
+app.post('/auth/metamask/nonce', async (req, res) => {
+  const address = normalizeEthAddress(req.body?.address);
+  if (!address) {
+    return res.status(400).json({ ok: false, error: 'invalid_address' });
+  }
+
+  const state = await loadAuthState();
+  const nonce = randomId(16);
+  state.metamaskNonces[address] = {
+    nonce,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + AUTH_METAMASK_NONCE_TTL_MS,
+  };
+  await saveAuthState(state);
+  return res.json({ ok: true, address, nonce, domain: req.get('host') });
+});
+
+app.post('/auth/metamask/verify', async (req, res) => {
+  const address = normalizeEthAddress(req.body?.address);
+  const signature = String(req.body?.signature || '').trim();
+  const nonce = String(req.body?.nonce || '').trim();
+  if (!address || !signature || !nonce) {
+    return res.status(400).json({ ok: false, error: 'invalid_request' });
+  }
+
+  const state = await loadAuthState();
+  const entry = state.metamaskNonces?.[address];
+  if (!entry || entry.nonce !== nonce || (entry.expiresAt && Date.now() > Number(entry.expiresAt))) {
+    return res.status(400).json({ ok: false, error: 'nonce_invalid' });
+  }
+
+  const message = `Login to manuscritos.live\nAddress: ${address}\nNonce: ${nonce}`;
+  let recovered;
+  try {
+    recovered = ethers.verifyMessage(message, signature);
+  } catch (_error) {
+    return res.status(400).json({ ok: false, error: 'bad_signature' });
+  }
+  if (normalizeEthAddress(recovered) !== address) {
+    return res.status(400).json({ ok: false, error: 'bad_signature' });
+  }
+
+  delete state.metamaskNonces[address];
+  let userId = Object.keys(state.users).find((id) => state.users[id]?.ethAddress === address);
+  if (!userId) {
+    userId = randomId(12);
+    state.users[userId] = { ethAddress: address, createdAt: Date.now() };
+  }
+  await saveAuthState(state);
+
+  await createSession(res, userId);
+  return res.json({ ok: true });
+});
+
+app.get('/gallery', requireAuth, async (req, res) => {
+  const jobs = await listJobsForUser(req.currentUser.id, 60);
+  return renderGallery(req, res, { jobs });
+});
+
+app.get('/gallery/:jobId', requireAuth, async (req, res) => {
+  const jobId = safeJobId(req.params.jobId);
+  if (!jobId) {
+    return res.status(404).send('Not found');
+  }
+  const metaPath = path.join(JOBS_DIR, jobId, 'meta.json');
+  try {
+    const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    if (String(meta?.userId || '') !== String(req.currentUser.id)) {
+      return res.status(404).send('Not found');
+    }
+    const summaryText = await fs.readFile(path.join(JOBS_DIR, jobId, 'summary.txt'), 'utf8').catch(() => '');
+    const fullText = await fs.readFile(path.join(JOBS_DIR, jobId, 'full.txt'), 'utf8').catch(() => '');
+    const fullRawText = meta?.files?.fullRaw
+      ? await fs.readFile(path.join(JOBS_DIR, jobId, String(meta.files.fullRaw)), 'utf8').catch(() => '')
+      : '';
+    return renderGallery(req, res, {
+      jobs: [],
+      job: { id: jobId, meta },
+      summaryText,
+      fullText,
+      fullRawText,
+    });
+  } catch (_error) {
+    return res.status(404).send('Not found');
+  }
+});
+
+app.get('/gallery/:jobId/file/:name', requireAuth, async (req, res) => {
+  const jobId = safeJobId(req.params.jobId);
+  const requested = String(req.params.name || '').trim();
+  if (!jobId || !requested) {
+    return res.status(404).send('Not found');
+  }
+
+  const metaPath = path.join(JOBS_DIR, jobId, 'meta.json');
+  try {
+    const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    if (String(meta?.userId || '') !== String(req.currentUser.id)) {
+      return res.status(404).send('Not found');
+    }
+
+    const allowed = new Set();
+    const files = meta?.files || {};
+    for (const key of ['original', 'preprocessed', 'summary', 'full', 'fullRaw', 'meta']) {
+      const name = files[key];
+      if (name && typeof name === 'string') {
+        allowed.add(name);
+      }
+    }
+
+    if (!allowed.has(requested)) {
+      return res.status(404).send('Not found');
+    }
+
+    const fullPath = path.join(JOBS_DIR, jobId, requested);
+    return res.sendFile(fullPath);
+  } catch (_error) {
+    return res.status(404).send('Not found');
+  }
 });
 
 app.post('/ops/openclaw/webhook', async (req, res) => {
@@ -1300,6 +1725,7 @@ app.post('/api/paypal/capture-order', async (req, res) => {
 });
 
 app.post('/', ocrLimiter, requestTimeoutMiddleware(45 * 1000), upload.single('image'), ocrCooldownMiddleware, async (req, res) => {
+  req.currentUser = await getUserFromRequest(req).catch(() => null);
   const selectedProfile = req.body.profile || 'historico';
   const selectedPsm = req.body.psm || '6';
   const selectedLanguage = normalizeLanguage(req.body.language || req.query?.lng || req.ipLanguage || req.language);
@@ -1383,6 +1809,7 @@ app.post('/', ocrLimiter, requestTimeoutMiddleware(45 * 1000), upload.single('im
       summaryText,
       fullText,
       fullTextRaw,
+      userId: req.currentUser?.id || '',
       language: selectedLanguage,
       profile: selectedProfile,
       psm: selectedPsm,

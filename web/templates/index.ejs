@@ -89,6 +89,14 @@
   <nav class="navbar">
     <div class="brand">OCR Mock</div>
     <div class="lang-wrap">
+      <% if (currentUser) { %>
+        <a href="/gallery" style="font-size:13px;">Gallery</a>
+        <form method="post" action="/logout" style="display:inline;margin:0;">
+          <button type="submit" style="padding:0.25rem 0.5rem;">Logout</button>
+        </form>
+      <% } else { %>
+        <a href="/login" style="font-size:13px;">Login</a>
+      <% } %>
       <span id="language-flag" class="flag-badge" aria-hidden="true"><%= flagMap[selectedLanguage] || '🌐' %></span>
       <label for="language"><%= t('ui.languageLabel') %></label>
       <select id="language" name="language" form="ocr-form" data-flags='<%- JSON.stringify(flagMap) %>'>

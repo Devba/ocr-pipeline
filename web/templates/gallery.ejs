@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="<%= currentLanguage %>" dir="<%= isRtl ? 'rtl' : 'ltr' %>">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gallery</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    .top { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 1rem; background: #fff; margin-top: 1rem; }
+    .list { display:flex; flex-direction:column; gap:0.5rem; }
+    .job { display:flex; align-items:center; justify-content:space-between; gap:0.75rem; padding:0.6rem 0.7rem; border:1px solid #eee; border-radius:8px; }
+    .job small { color:#555; }
+    textarea { width:100%; min-height:260px; font-family: monospace; font-size: 13px; }
+    a { color:#0b5; }
+    button { padding:0.5rem 0.8rem; }
+    .muted { color:#555; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <p style="margin:0;"><a href="/">← Home</a></p>
+      <h1 style="margin:0.2rem 0;">Gallery</h1>
+      <% if (currentUser && currentUser.email) { %>
+        <div class="muted">Logged in as <%= currentUser.email %></div>
+      <% } else if (currentUser && currentUser.ethAddress) { %>
+        <div class="muted">Logged in as <%= currentUser.ethAddress %></div>
+      <% } %>
+    </div>
+    <form method="post" action="/logout" style="margin:0;">
+      <button type="submit">Logout</button>
+    </form>
+  </div>
+
+  <% if (typeof job !== 'undefined' && job) { %>
+    <div class="card">
+      <h2 style="margin-top:0;">Job <%= job.id %></h2>
+      <div class="muted">Engine: <%= job.meta && job.meta.engine ? job.meta.engine : '' %> · Lang: <%= job.meta && job.meta.language ? job.meta.language : '' %></div>
+
+      <p>
+        <% if (job.meta && job.meta.files && job.meta.files.original) { %>
+          <a href="/gallery/<%= job.id %>/file/<%= encodeURIComponent(job.meta.files.original) %>" target="_blank" rel="noopener">Original</a>
+        <% } %>
+        <% if (job.meta && job.meta.files && job.meta.files.preprocessed) { %>
+          · <a href="/gallery/<%= job.id %>/file/<%= encodeURIComponent(job.meta.files.preprocessed) %>" target="_blank" rel="noopener">Preprocessed</a>
+        <% } %>
+      </p>
+
+      <h3>Summary</h3>
+      <textarea readonly><%= summaryText || '' %></textarea>
+
+      <h3>Full</h3>
+      <textarea readonly><%= fullText || '' %></textarea>
+
+      <% if (fullRawText) { %>
+        <h3>Full (raw OCR)</h3>
+        <textarea readonly><%= fullRawText %></textarea>
+      <% } %>
+    </div>
+  <% } %>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Your jobs</h2>
+    <% if (!jobs || jobs.length === 0) { %>
+      <p class="muted">No jobs yet. Run OCR from the home page.</p>
+    <% } else { %>
+      <div class="list">
+        <% jobs.forEach(function(j) { %>
+          <div class="job">
+            <div>
+              <div><a href="/gallery/<%= j.id %>"><%= j.id %></a></div>
+              <small><%= j.createdAt %> · <%= j.engine %> · <%= j.language %></small>
+            </div>
+            <div>
+              <a href="/gallery/<%= j.id %>">View</a>
+            </div>
+          </div>
+        <% }) %>
+      </div>
+    <% } %>
+  </div>
+</body>
+</html>

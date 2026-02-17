@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="<%= currentLanguage %>" dir="<%= isRtl ? 'rtl' : 'ltr' %>">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 1rem; background: #fff; }
+    .row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+    input { padding: 0.55rem 0.6rem; min-width: 260px; }
+    button { padding: 0.6rem 1rem; }
+    .error { background: #fde8e8; color: #b91c1c; border: 1px solid #fca5a5; padding: 0.8rem; border-radius: 8px; margin-bottom: 0.8rem; }
+    .ok { background: #ecfdf3; color: #065f46; border: 1px solid #6ee7b7; padding: 0.8rem; border-radius: 8px; margin-bottom: 0.8rem; }
+    a { color: #0b5; }
+  </style>
+</head>
+<body>
+  <p><a href="/">← Home</a></p>
+  <h1>Login</h1>
+
+  <% if (error) { %>
+    <div class="error"><%= error %></div>
+  <% } %>
+  <% if (info) { %>
+    <div class="ok"><%= info %></div>
+  <% } %>
+
+  <div class="card">
+    <h2>Email</h2>
+    <form method="post" action="/auth/email/start">
+      <input type="hidden" name="language" value="<%= currentLanguage %>">
+      <div class="row">
+        <input type="email" name="email" placeholder="you@example.com" required>
+        <button type="submit">Send login link</button>
+      </div>
+    </form>
+
+    <h2 style="margin-top:1.2rem;">MetaMask</h2>
+    <div class="row">
+      <button type="button" id="login-metamask">Login with MetaMask</button>
+      <span id="mm-status" style="font-size:13px;color:#333;"></span>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const btn = document.getElementById('login-metamask');
+      const status = document.getElementById('mm-status');
+      if (!btn) return;
+
+      function setStatus(msg, isErr) {
+        if (!status) return;
+        status.textContent = msg || '';
+        status.style.color = isErr ? '#b91c1c' : '#333';
+      }
+
+      btn.addEventListener('click', async () => {
+        if (!window.ethereum || !window.ethereum.request) {
+          setStatus('MetaMask not available.', true);
+          return;
+        }
+        btn.disabled = true;
+        try {
+          setStatus('Connecting...', false);
+          const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          const address = accounts && accounts[0] ? String(accounts[0]) : '';
+          if (!address) {
+            setStatus('No account selected.', true);
+            return;
+          }
+
+          const nonceRes = await fetch('/auth/metamask/nonce', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address }),
+          });
+          const nonceData = await nonceRes.json();
+          if (!nonceRes.ok || !nonceData?.ok) {
+            setStatus('Could not get nonce.', true);
+            return;
+          }
+
+          const message = `Login to manuscritos.live\nAddress: ${nonceData.address}\nNonce: ${nonceData.nonce}`;
+          setStatus('Please sign message...', false);
+          const signature = await window.ethereum.request({
+            method: 'personal_sign',
+            params: [message, nonceData.address],
+          });
+
+          const verifyRes = await fetch('/auth/metamask/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address: nonceData.address, nonce: nonceData.nonce, signature }),
+          });
+          const verifyData = await verifyRes.json();
+          if (!verifyRes.ok || !verifyData?.ok) {
+            setStatus('Signature failed.', true);
+            return;
+          }
+
+          window.location.href = '/gallery';
+        } catch (e) {
+          setStatus(e && e.message ? e.message : 'Error.', true);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
