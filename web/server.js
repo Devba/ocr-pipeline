@@ -1873,6 +1873,7 @@ app.get('/admin/taller', requireAdminStatsToken, async (req, res) => {
   const runs = await listTallerRuns(25);
   const runId = String(req.query?.id || '').trim();
   const run = runId ? await loadTallerRun(runId) : null;
+  const info = String(req.query?.info || '').trim();
   return res.render('admin-taller', {
     token,
     runs,
@@ -1889,6 +1890,7 @@ app.get('/admin/taller', requireAdminStatsToken, async (req, res) => {
       tesseractPsm: String(req.query?.tpsm || '6'),
     },
     result: null,
+    info,
     error: '',
   });
 });
@@ -1898,6 +1900,7 @@ app.get('/admin/taller/run/:id', requireAdminStatsToken, async (req, res) => {
   const token = extractAdminToken(req);
   const runs = await listTallerRuns(25);
   const run = await loadTallerRun(req.params.id);
+  const info = String(req.query?.info || '').trim();
   if (!run) {
     return res.status(404).render('admin-taller', {
       token,
@@ -1905,6 +1908,7 @@ app.get('/admin/taller/run/:id', requireAdminStatsToken, async (req, res) => {
       selectedRun: null,
       form: { engine: 'docai', profile: 'historico', useCustom: false, scale: '1.6', threshold: '170', median: '3', postprocess: false, tesseractLang: 'spa', tesseractPsm: '6' },
       result: null,
+      info: '',
       error: 'Run not found',
     });
   }
@@ -1914,6 +1918,7 @@ app.get('/admin/taller/run/:id', requireAdminStatsToken, async (req, res) => {
     selectedRun: run,
     form: { engine: 'docai', profile: 'historico', useCustom: false, scale: '1.6', threshold: '170', median: '3', postprocess: false, tesseractLang: 'spa', tesseractPsm: '6' },
     result: null,
+    info,
     error: '',
   });
 });
@@ -1946,6 +1951,62 @@ app.get('/admin/taller/file/:id/:name', requireAdminStatsToken, async (req, res)
 
   const fullPath = path.join(run.dir, requested);
   return res.sendFile(fullPath);
+});
+
+app.post('/admin/taller/postprocess/:id', requireAdminStatsToken, requestTimeoutMiddleware(120 * 1000), async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const token = extractAdminToken(req);
+  const runId = String(req.params.id || '').trim();
+  const safeId = /^[a-zA-Z0-9_-]{6,80}$/.test(runId) ? runId : '';
+  if (!safeId) {
+    return res.status(404).send('Not found');
+  }
+
+  const run = await loadTallerRun(safeId);
+  if (!run) {
+    return res.status(404).send('Not found');
+  }
+
+  const rawText = String(run.textRaw || '').trim();
+  if (!rawText) {
+    const url = new URL(`/admin/taller/run/${encodeURIComponent(safeId)}`, `${req.protocol}://${req.get('host')}`);
+    url.searchParams.set('token', token);
+    url.searchParams.set('info', 'No OCR raw text found for this run.');
+    return res.redirect(url.pathname + '?' + url.searchParams.toString());
+  }
+
+  const post = await postprocessTextIfEnabled(rawText, { jobId: safeId });
+  const finalText = String(post.text || '').trim();
+  const postprocessMeta = post.meta || null;
+
+  try {
+    await fs.writeFile(path.join(run.dir, 'ocr_final.txt'), (finalText || rawText).trimEnd() + '\n', 'utf8');
+    if (postprocessMeta) {
+      await fs.writeFile(path.join(run.dir, 'postprocess.json'), JSON.stringify(postprocessMeta, null, 2) + '\n', 'utf8');
+    }
+
+    const metaPath = path.join(run.dir, 'meta.json');
+    const meta = run.meta && typeof run.meta === 'object' ? run.meta : {};
+    meta.postprocess = postprocessMeta;
+    meta.files = meta.files && typeof meta.files === 'object' ? meta.files : {};
+    meta.files.final = 'ocr_final.txt';
+    meta.files.postprocess = postprocessMeta ? 'postprocess.json' : null;
+    await fs.writeFile(metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf8');
+  } catch (error) {
+    const url = new URL(`/admin/taller/run/${encodeURIComponent(safeId)}`, `${req.protocol}://${req.get('host')}`);
+    url.searchParams.set('token', token);
+    url.searchParams.set('info', `Postprocess write failed: ${String(error?.message || error)}`);
+    return res.redirect(url.pathname + '?' + url.searchParams.toString());
+  }
+
+  const info = post?.ok
+    ? 'Postprocess applied.'
+    : (post?.skipped ? 'Postprocess skipped (not configured or disabled). Final equals raw.' : 'Postprocess failed; kept raw as final.');
+
+  const url = new URL(`/admin/taller/run/${encodeURIComponent(safeId)}`, `${req.protocol}://${req.get('host')}`);
+  url.searchParams.set('token', token);
+  url.searchParams.set('info', info);
+  return res.redirect(url.pathname + '?' + url.searchParams.toString());
 });
 
 app.post('/admin/taller/run', requireAdminStatsToken, requestTimeoutMiddleware(120 * 1000), upload.single('image'), async (req, res) => {

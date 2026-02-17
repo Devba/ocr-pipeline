@@ -45,6 +45,12 @@
     </div>
   <% } %>
 
+  <% if (info) { %>
+    <div class="card" style="margin-top:1rem;">
+      <div class="muted"><strong>Info:</strong> <%= info %></div>
+    </div>
+  <% } %>
+
   <div class="layout">
     <div class="card">
       <h2 style="margin-top:0; font-size:16px;">Runs</h2>
@@ -73,6 +79,10 @@
           <div>Postprocess</div><div><%= JSON.stringify(selectedRun.meta?.postprocess || null) %></div>
         </div>
         <div class="hr"></div>
+        <form method="POST" action="/admin/taller/postprocess/<%= encodeURIComponent(selectedRun.id) %>?token=<%= encodeURIComponent(token || '') %>" style="margin-bottom:0.75rem;">
+          <button type="submit" style="padding:0.5rem 0.85rem;">Apply postprocess (raw → final)</button>
+          <div class="muted" style="margin-top:0.35rem;">Runs the configured postprocess on saved OCR raw text (no new OCR call).</div>
+        </form>
         <div class="row">
           <div>
             <label>Original</label>
