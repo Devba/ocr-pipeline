@@ -1,0 +1,27 @@
+# manuscritos.live robots.txt (2026)
+# We welcome “good bots” (search, archives, research) and provide a bot-friendly API.
+# Bot info / API terms: https://manuscritos.live/api/bot-info
+
+User-agent: *
+Allow: /
+
+# Public assets
+Allow: /static/
+
+# Sensitive / non-indexable areas
+Disallow: /admin/
+Disallow: /ops/
+Disallow: /auth/
+Disallow: /login
+Disallow: /logout
+Disallow: /gallery
+Disallow: /gallery/
+Disallow: /unlock
+Disallow: /face-check/
+Disallow: /api/paypal/
+
+# If you run a crawler, please keep requests modest and identify yourself.
+# Crawl-delay is honored by some bots.
+Crawl-delay: 2
+
+Sitemap: https://manuscritos.live/sitemap.xml

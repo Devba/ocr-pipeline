@@ -40,6 +40,9 @@ services:
       AUTH_METAMASK_NONCE_TTL_MS: "${AUTH_METAMASK_NONCE_TTL_MS:-600000}"
       AUTH_TOKEN_SECRET: "${AUTH_TOKEN_SECRET:-}"
 
+      # Bots / SEO
+      BOT_CONTACT_EMAIL: "${BOT_CONTACT_EMAIL:-}"
+
       # Google Document AI (OCR) - opcional
       DOC_AI_ENABLED: "${DOC_AI_ENABLED:-0}"
       DOC_AI_PROJECT_ID: "${DOC_AI_PROJECT_ID:-}"

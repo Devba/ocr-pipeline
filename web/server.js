@@ -121,6 +121,7 @@ const SMTP_USER = String(process.env.SMTP_USER || '').trim();
 const SMTP_PASS = String(process.env.SMTP_PASS || '').trim();
 const SMTP_FROM = String(process.env.SMTP_FROM || '').trim();
 const ALERT_EMAIL_TO = String(process.env.ALERT_EMAIL_TO || '').trim();
+const BOT_CONTACT_EMAIL = String(process.env.BOT_CONTACT_EMAIL || SMTP_FROM || '').trim();
 const LANGUAGE_COUNTRIES = {
   es: new Set(['ES', 'MX', 'AR', 'CO', 'PE', 'VE', 'CL', 'EC', 'GT', 'CU', 'BO', 'DO', 'HN', 'PY', 'SV', 'NI', 'CR', 'PA', 'UY']),
   pt: new Set(['PT', 'BR', 'AO', 'MZ', 'CV', 'GW', 'ST', 'TL']),
@@ -740,6 +741,39 @@ const ocrLimiter = rateLimit({
 app.use(generalLimiter);
 
 app.use('/static', express.static(path.join(BASE_DIR, 'public')));
+
+app.get('/robots.txt', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  return res.sendFile(path.join(BASE_DIR, 'public', 'robots.txt'));
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  return res.sendFile(path.join(BASE_DIR, 'public', 'sitemap.xml'));
+});
+
+app.get('/api/bot-info', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  return res.json({
+    ok: true,
+    name: 'manuscritos.live',
+    purpose: 'OCR for historical handwritten documents (Spanish/Latin).',
+    botPolicy: {
+      summary: 'Crawling public pages is allowed. Authenticated/private content is disallowed.',
+      robotsTxt: '/robots.txt',
+      sitemap: '/sitemap.xml',
+      contact: BOT_CONTACT_EMAIL || null,
+      rateLimits: {
+        note: 'Interactive OCR endpoints are rate-limited. Do not bulk-submit OCR jobs.',
+      },
+      disallowedPaths: ['/admin/', '/ops/', '/auth/', '/gallery', '/unlock', '/face-check/', '/api/paypal/'],
+    },
+    api: {
+      health: '/',
+      stats: ADMIN_STATS_TOKEN ? '/admin/stats (token required)' : null,
+    },
+  });
+});
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
