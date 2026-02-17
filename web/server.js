@@ -941,11 +941,32 @@ function buildJobPaths(jobId, originalExt = '') {
     jobDir,
     originalPath: path.join(jobDir, `original${ext || '.bin'}`),
     preprocessedPath: path.join(jobDir, 'preprocessed.png'),
+    thumbPath: path.join(jobDir, 'thumb.jpg'),
     summaryPath: path.join(jobDir, 'summary.txt'),
     fullPath: path.join(jobDir, 'full.txt'),
     fullRawPath: path.join(jobDir, 'full_raw.txt'),
     metaPath: path.join(jobDir, 'meta.json'),
   };
+}
+
+async function createJobThumbnail({ sourcePath, thumbPath }) {
+  if (!sourcePath || !thumbPath) {
+    return false;
+  }
+  if (!await pathExists(sourcePath)) {
+    return false;
+  }
+
+  try {
+    await sharp(sourcePath)
+      .rotate()
+      .resize({ width: 420, height: 420, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 78 })
+      .toFile(thumbPath);
+    return true;
+  } catch (_error) {
+    return false;
+  }
 }
 
 async function persistJob({
@@ -989,6 +1010,16 @@ async function persistJob({
     }
   }
 
+  const uploadMime = String(uploadedFile?.mimetype || '').toLowerCase();
+  const uploadExt = path.extname(String(uploadedFile?.originalname || '')).toLowerCase();
+  const looksLikePdf = uploadMime === 'application/pdf' || uploadExt === '.pdf';
+
+  let hasThumb = false;
+  if (!looksLikePdf) {
+    const thumbSource = await pathExists(paths.preprocessedPath) ? paths.preprocessedPath : paths.originalPath;
+    hasThumb = await createJobThumbnail({ sourcePath: thumbSource, thumbPath: paths.thumbPath });
+  }
+
   await fs.writeFile(paths.summaryPath, String(summaryText || '').trimEnd() + '\n', 'utf8');
   await fs.writeFile(paths.fullPath, String(fullText || '').trimEnd() + '\n', 'utf8');
   if (fullTextRaw) {
@@ -1015,6 +1046,7 @@ async function persistJob({
     files: {
       original: path.basename(paths.originalPath),
       preprocessed: await pathExists(paths.preprocessedPath) ? path.basename(paths.preprocessedPath) : null,
+      thumb: hasThumb ? path.basename(paths.thumbPath) : null,
       summary: path.basename(paths.summaryPath),
       full: path.basename(paths.fullPath),
       fullRaw: fullTextRaw ? path.basename(paths.fullRawPath) : null,
@@ -1281,6 +1313,7 @@ async function listJobsForUser(userId, limit = 50) {
         createdAt: meta?.createdAt || '',
         engine: meta?.engine || '',
         language: meta?.language || '',
+        thumb: meta?.files?.thumb || '',
       });
     } catch (_error) {
     }
@@ -1531,7 +1564,7 @@ app.get('/gallery/:jobId/file/:name', requireAuth, async (req, res) => {
 
     const allowed = new Set();
     const files = meta?.files || {};
-    for (const key of ['original', 'preprocessed', 'summary', 'full', 'fullRaw', 'meta']) {
+    for (const key of ['original', 'preprocessed', 'thumb', 'summary', 'full', 'fullRaw', 'meta']) {
       const name = files[key];
       if (name && typeof name === 'string') {
         allowed.add(name);

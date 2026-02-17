@@ -10,6 +10,7 @@
     .card { border: 1px solid #ddd; border-radius: 10px; padding: 1rem; background: #fff; margin-top: 1rem; }
     .list { display:flex; flex-direction:column; gap:0.5rem; }
     .job { display:flex; align-items:center; justify-content:space-between; gap:0.75rem; padding:0.6rem 0.7rem; border:1px solid #eee; border-radius:8px; }
+    .thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; background: #fafafa; }
     .job small { color:#555; }
     textarea { width:100%; min-height:260px; font-family: monospace; font-size: 13px; }
     a { color:#0b5; }
@@ -47,6 +48,12 @@
         <% } %>
       </p>
 
+      <% if (job.meta && job.meta.files && job.meta.files.thumb) { %>
+        <p style="margin-top:0.6rem;">
+          <img class="thumb" style="width:160px;height:160px;" src="/gallery/<%= job.id %>/file/<%= encodeURIComponent(job.meta.files.thumb) %>" alt="Thumbnail">
+        </p>
+      <% } %>
+
       <h3>Summary</h3>
       <textarea readonly><%= summaryText || '' %></textarea>
 
@@ -68,9 +75,14 @@
       <div class="list">
         <% jobs.forEach(function(j) { %>
           <div class="job">
-            <div>
-              <div><a href="/gallery/<%= j.id %>"><%= j.id %></a></div>
-              <small><%= j.createdAt %> · <%= j.engine %> · <%= j.language %></small>
+            <div style="display:flex;align-items:center;gap:0.7rem;">
+              <% if (j.thumb) { %>
+                <img class="thumb" src="/gallery/<%= j.id %>/file/<%= encodeURIComponent(j.thumb) %>" alt="Thumbnail">
+              <% } %>
+              <div>
+                <div><a href="/gallery/<%= j.id %>"><%= j.id %></a></div>
+                <small><%= j.createdAt %> · <%= j.engine %> · <%= j.language %></small>
+              </div>
             </div>
             <div>
               <a href="/gallery/<%= j.id %>">View</a>
