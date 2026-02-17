@@ -2009,11 +2009,7 @@ app.post('/admin/taller/postprocess/:id', requireAdminStatsToken, requestTimeout
   return res.redirect(url.pathname + '?' + url.searchParams.toString());
 });
 
-app.post('/admin/taller/run', requireAdminStatsToken, requestTimeoutMiddleware(120 * 1000), upload.single('image'), async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  const token = extractAdminToken(req);
-  const runs = await listTallerRuns(25);
-
+function buildTallerFormState(req) {
   const engine = String(req.body?.engine || 'docai').trim();
   const profile = String(req.body?.profile || 'historico').trim();
   const useCustom = String(req.body?.custom_preprocess || '') === '1';
@@ -2024,7 +2020,7 @@ app.post('/admin/taller/run', requireAdminStatsToken, requestTimeoutMiddleware(1
   const tesseractLang = String(req.body?.tesseract_lang || 'spa').trim() || 'spa';
   const tesseractPsm = String(req.body?.tesseract_psm || '6').trim() || '6';
 
-  const formState = {
+  return {
     engine,
     profile,
     useCustom,
@@ -2035,6 +2031,50 @@ app.post('/admin/taller/run', requireAdminStatsToken, requestTimeoutMiddleware(1
     tesseractLang,
     tesseractPsm,
   };
+}
+
+function tallerUploadSingle(req, res, next) {
+  upload.single('image')(req, res, async (err) => {
+    if (!err) {
+      return next();
+    }
+
+    res.setHeader('Cache-Control', 'no-store');
+    const token = extractAdminToken(req);
+    const runs = await listTallerRuns(25).catch(() => []);
+    const formState = buildTallerFormState(req);
+    const isFileTooLarge = err?.code === 'LIMIT_FILE_SIZE';
+    const message = isFileTooLarge
+      ? `Upload failed: file too large (max ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))} MB).`
+      : `Upload failed: ${String(err?.message || err || 'UPLOAD_ERROR')}`;
+
+    return res.status(400).render('admin-taller', {
+      token,
+      runs,
+      selectedRun: null,
+      form: formState,
+      result: null,
+      info: '',
+      error: message,
+    });
+  });
+}
+
+app.post('/admin/taller/run', requireAdminStatsToken, requestTimeoutMiddleware(120 * 1000), tallerUploadSingle, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const token = extractAdminToken(req);
+  const runs = await listTallerRuns(25);
+
+  const formState = buildTallerFormState(req);
+  const engine = formState.engine;
+  const profile = formState.profile;
+  const useCustom = formState.useCustom;
+  const scale = Number(formState.scale || 1.6);
+  const threshold = Number(formState.threshold || 170);
+  const median = Number(formState.median || 3);
+  const doPostprocess = Boolean(formState.postprocess);
+  const tesseractLang = formState.tesseractLang;
+  const tesseractPsm = formState.tesseractPsm;
 
   if (!req.file) {
     return res.status(400).render('admin-taller', {
@@ -2043,6 +2083,7 @@ app.post('/admin/taller/run', requireAdminStatsToken, requestTimeoutMiddleware(1
       selectedRun: null,
       form: formState,
       result: null,
+      info: '',
       error: 'No file uploaded',
     });
   }
@@ -2091,6 +2132,7 @@ app.post('/admin/taller/run', requireAdminStatsToken, requestTimeoutMiddleware(1
       selectedRun: null,
       form: formState,
       result: null,
+      info: '',
       error: `Preprocess failed: ${String(error?.message || error)}`,
     });
   }
@@ -2172,6 +2214,7 @@ app.post('/admin/taller/run', requireAdminStatsToken, requestTimeoutMiddleware(1
         ocr: ocrMeta,
         postprocess: postprocessMeta,
       },
+      info: '',
       error: '',
     });
   } catch (error) {
@@ -2181,6 +2224,7 @@ app.post('/admin/taller/run', requireAdminStatsToken, requestTimeoutMiddleware(1
       selectedRun: null,
       form: formState,
       result: null,
+      info: '',
       error: `Run failed: ${String(error?.message || error)}`,
     });
   }
