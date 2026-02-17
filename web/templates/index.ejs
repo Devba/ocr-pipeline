@@ -149,7 +149,7 @@
     </details>
   </section>
 
-  <form id="ocr-form" method="post" enctype="multipart/form-data">
+  <form id="ocr-form" method="post" enctype="multipart/form-data" action="/">
     <label for="image"><%= t('ui.imageLabel') %></label><br>
     <input type="file" id="image" name="image" accept="image/*">
 
@@ -235,8 +235,10 @@
         <input type="hidden" name="language" value="<%= selectedLanguage %>">
       </form>
       <div class="actions">
-        <% if (paymentConfig && paymentConfig.paypalEnabled) { %>
+        <% if (paymentConfig && paymentConfig.paypalEnabled && documentId) { %>
           <div id="paypal-buttons" style="min-width:260px;"></div>
+        <% } else if (paymentConfig && paymentConfig.paypalEnabled) { %>
+          <p style="margin:0;"><%= t('errors.selectImage') %></p>
         <% } else { %>
           <p style="margin:0;"><%= t('errors.paypalNotConfigured') %></p>
         <% } %>
