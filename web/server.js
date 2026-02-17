@@ -230,9 +230,11 @@ function pruneUniqueVisitors(now) {
   }
 }
 
-function buildMetricsSnapshot() {
+function buildMetricsSnapshot(recentLimit = 50) {
   const now = Date.now();
   pruneUniqueVisitors(now);
+
+  const safeRecentLimit = Math.max(10, Math.min(200, Number(recentLimit) || 50));
 
   const topEntries = (map, limit = 20) =>
     Array.from(map.entries())
@@ -284,7 +286,7 @@ function buildMetricsSnapshot() {
     topPaths: topEntries(metricsState.pathCounts),
     statusCounts: topEntries(metricsState.statusCounts, 50),
     methodCounts: topEntries(metricsState.methodCounts, 20),
-    recentEvents: metricsState.recentEvents.slice(-50),
+    recentEvents: metricsState.recentEvents.slice(-safeRecentLimit),
   };
 }
 
@@ -1689,7 +1691,19 @@ function requireAdminStatsToken(req, res, next) {
 
 app.get('/admin/stats', requireAdminStatsToken, (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  return res.json(buildMetricsSnapshot());
+  const recent = req.query?.recent;
+  return res.json(buildMetricsSnapshot(recent));
+});
+
+app.get('/admin/stats/dashboard', requireAdminStatsToken, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  // Token se valida por middleware; en el dashboard se reutiliza via query (?token=...)
+  const token = extractAdminToken(req);
+  const recent = Number(req.query?.recent || 200);
+  return res.render('admin-stats', {
+    token,
+    recent: Number.isFinite(recent) ? Math.max(10, Math.min(200, recent)) : 200,
+  });
 });
 
 app.get('/face-check/challenge', (req, res) => {

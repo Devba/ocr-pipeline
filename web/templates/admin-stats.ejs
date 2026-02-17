@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Stats</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem; }
+    .top { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
+    .card { border:1px solid #ddd; border-radius:10px; padding:1rem; background:#fff; margin-top:1rem; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    label { font-size: 13px; color:#333; }
+    input, select { padding: 0.45rem 0.55rem; }
+    .filters { display:flex; gap:0.75rem; flex-wrap:wrap; align-items:flex-end; }
+    .filters > div { display:flex; flex-direction:column; gap:0.25rem; }
+    table { width:100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border-bottom: 1px solid #eee; padding: 0.5rem 0.4rem; text-align:left; vertical-align: top; }
+    th { background:#fafafa; position: sticky; top: 0; }
+    .muted { color:#555; }
+    .pill { display:inline-block; font-size: 11px; padding: 0.15rem 0.45rem; border: 1px solid #ddd; border-radius: 999px; }
+    .error { color:#b91c1c; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <h1 style="margin:0;">Admin Stats</h1>
+      <div class="muted">Live metrics snapshot + recent events</div>
+    </div>
+    <div>
+      <a href="/" class="pill">Home</a>
+      <a href="/admin/stats?token=<%= encodeURIComponent(token || '') %>" class="pill">JSON</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="filters">
+      <div>
+        <label>Refresh</label>
+        <select id="refresh">
+          <option value="0">manual</option>
+          <option value="2000">2s</option>
+          <option value="5000" selected>5s</option>
+          <option value="15000">15s</option>
+        </select>
+      </div>
+      <div>
+        <label>Window</label>
+        <select id="window">
+          <option value="5">last 5 min</option>
+          <option value="15" selected>last 15 min</option>
+          <option value="60">last 60 min</option>
+        </select>
+      </div>
+      <div>
+        <label>Method</label>
+        <select id="method">
+          <option value="">all</option>
+          <option>GET</option>
+          <option>POST</option>
+        </select>
+      </div>
+      <div>
+        <label>Status</label>
+        <select id="status">
+          <option value="">all</option>
+          <option>200</option>
+          <option>304</option>
+          <option>400</option>
+          <option>401</option>
+          <option>404</option>
+          <option>408</option>
+          <option>429</option>
+          <option>500</option>
+        </select>
+      </div>
+      <div>
+        <label>Path contains</label>
+        <input id="path" placeholder="/api" style="min-width: 180px;">
+      </div>
+      <div>
+        <label>Only bots</label>
+        <select id="bots">
+          <option value="">all</option>
+          <option value="1">bots only</option>
+        </select>
+      </div>
+      <div>
+        <button id="reload" style="padding:0.55rem 0.9rem;">Reload</button>
+      </div>
+      <div class="muted" id="statusline" style="margin-left:auto;"></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2 style="margin-top:0; font-size:16px;">Requests / minute</h2>
+      <canvas id="chartReq" height="140"></canvas>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0; font-size:16px;">Errors / minute</h2>
+      <canvas id="chartErr" height="140"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0; font-size:16px;">Recent events</h2>
+    <div class="muted">Showing up to <%= recent %> events</div>
+    <div style="max-height: 420px; overflow:auto; margin-top:0.6rem;">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Method</th>
+            <th>Path</th>
+            <th>Status</th>
+            <th>ms</th>
+            <th>UA</th>
+            <th>Bot reasons</th>
+            <th>IP</th>
+          </tr>
+        </thead>
+        <tbody id="events"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script>
+    window.ADMIN_TOKEN = <%- JSON.stringify(token || '') %>;
+    window.ADMIN_RECENT = <%- JSON.stringify(recent || 200) %>;
+  </script>
+  <script src="/static/admin-stats.js"></script>
+</body>
+</html>
