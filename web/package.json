@@ -10,6 +10,7 @@
     "test:validator": "node scripts/test_manuscript_validation.js"
   },
   "dependencies": {
+    "@google-cloud/documentai": "^9.5.0",
     "ejs": "^3.1.10",
     "express": "^4.21.2",
     "express-rate-limit": "^7.4.1",

@@ -11,6 +11,7 @@ const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const sharp = require('sharp');
 const nodemailer = require('nodemailer');
+const { v1: docAiV1 } = require('@google-cloud/documentai');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -46,6 +47,22 @@ const PAYPAL_CURRENCY = String(process.env.PAYPAL_CURRENCY || 'EUR').toUpperCase
 const PAYPAL_UNLOCK_AMOUNT = String(process.env.PAYPAL_UNLOCK_AMOUNT || '1.00');
 const PAYPAL_ENABLED = Boolean(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET);
 const PAYPAL_API_BASE = PAYPAL_ENV === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+
+const DOC_AI_ENABLED = process.env.DOC_AI_ENABLED === '1';
+const DOC_AI_PROJECT_ID = String(process.env.DOC_AI_PROJECT_ID || '').trim();
+const DOC_AI_LOCATION = String(process.env.DOC_AI_LOCATION || 'us').trim();
+const DOC_AI_PROCESSOR_ID = String(process.env.DOC_AI_PROCESSOR_ID || '').trim();
+const DOC_AI_PROCESSOR_VERSION_ID = String(process.env.DOC_AI_PROCESSOR_VERSION_ID || '').trim();
+const DOC_AI_SUMMARY_CHARS = Number(process.env.DOC_AI_SUMMARY_CHARS || 1200);
+
+const DOC_AI_MIME_BY_EXT = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff',
+  '.pdf': 'application/pdf',
+};
 
 const OPENCLAW_WEBHOOK_SECRET = String(process.env.OPENCLAW_WEBHOOK_SECRET || '').trim();
 const SMTP_HOST = String(process.env.SMTP_HOST || '').trim();
@@ -566,6 +583,52 @@ function buildMockFullDocument(language) {
   return Array.isArray(lines) ? lines.join('\n') : '';
 }
 
+function isDocAiConfigured() {
+  return Boolean(DOC_AI_ENABLED && DOC_AI_PROJECT_ID && DOC_AI_LOCATION && DOC_AI_PROCESSOR_ID);
+}
+
+function getDocAiMimeType(filePath) {
+  const ext = path.extname(String(filePath || '')).toLowerCase();
+  return DOC_AI_MIME_BY_EXT[ext] || 'application/octet-stream';
+}
+
+function buildDocAiProcessorName(client) {
+  if (DOC_AI_PROCESSOR_VERSION_ID) {
+    return client.processorVersionPath(DOC_AI_PROJECT_ID, DOC_AI_LOCATION, DOC_AI_PROCESSOR_ID, DOC_AI_PROCESSOR_VERSION_ID);
+  }
+  return client.processorPath(DOC_AI_PROJECT_ID, DOC_AI_LOCATION, DOC_AI_PROCESSOR_ID);
+}
+
+async function runDocAiOcr(filePath) {
+  const client = new docAiV1.DocumentProcessorServiceClient({
+    apiEndpoint: `${DOC_AI_LOCATION}-documentai.googleapis.com`,
+  });
+
+  const name = buildDocAiProcessorName(client);
+  const content = await fs.readFile(filePath);
+  const mimeType = getDocAiMimeType(filePath);
+
+  const [result] = await client.processDocument({
+    name,
+    rawDocument: {
+      content,
+      mimeType,
+    },
+  });
+
+  const text = String(result?.document?.text || '').trim();
+  return text;
+}
+
+function buildSummaryFromFullText(fullText) {
+  const maxChars = Number.isFinite(DOC_AI_SUMMARY_CHARS) ? Math.max(200, Math.min(10000, DOC_AI_SUMMARY_CHARS)) : 1200;
+  const normalized = String(fullText || '').trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxChars).trim()}…`;
+}
+
 function buildViewModel(req, extra = {}) {
   const explicitLanguage = extra.selectedLanguage || req.body?.language || req.query?.lng;
   const currentLanguage = normalizeLanguage(
@@ -878,12 +941,23 @@ app.post('/', ocrLimiter, requestTimeoutMiddleware(45 * 1000), upload.single('im
   const jobId = path.parse(req.file.filename).name;
   const preprocessedPath = path.join(WORK_DIR, `${jobId}_preprocessed.png`);
   try {
+    let ocrInputPath = req.file.path;
     if (!clientPreprocessed) {
       await preprocessImage(req.file.path, preprocessedPath, selectedProfile);
+      ocrInputPath = preprocessedPath;
     }
 
-    const summaryText = buildMockSummary(selectedLanguage);
-    const fullText = buildMockFullDocument(selectedLanguage);
+    let summaryText = '';
+    let fullText = '';
+
+    if (isDocAiConfigured()) {
+      fullText = await runDocAiOcr(ocrInputPath);
+      summaryText = buildSummaryFromFullText(fullText);
+    } else {
+      summaryText = buildMockSummary(selectedLanguage);
+      fullText = buildMockFullDocument(selectedLanguage);
+    }
+
     mockDocuments.set(jobId, { summaryText, fullText, language: selectedLanguage });
 
     return renderPage(req, res, {
