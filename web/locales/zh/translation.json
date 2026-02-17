@@ -72,7 +72,9 @@
   "payment": {
     "paypalLabel": "PayPal",
     "metamaskLabel": "MetaMask",
+    "simulateLabel": "模拟",
     "paypalButton": "使用 PayPal 支付",
+    "simulateButton": "模拟支付",
     "metamaskButton": "使用 MetaMask 支付（模拟）"
   },
   "messages": {

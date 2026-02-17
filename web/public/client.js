@@ -13,6 +13,8 @@
   const metamaskButton = document.getElementById('pay-metamask');
   const paypalForm = document.getElementById('unlock-paypal');
   const metamaskForm = document.getElementById('unlock-metamask');
+  const simulateButton = document.getElementById('pay-simulate');
+  const simulateForm = document.getElementById('unlock-simulate');
   const paypalOrderIdInput = document.getElementById('paypal_order_id');
   const takePhotoButton = document.getElementById('take-photo');
   const photoCaptureNode = document.getElementById('photo-capture');
@@ -624,6 +626,7 @@
 
   setupPayPalSmartButtons();
   simulatePayment(metamaskButton, metamaskForm, 'MetaMask');
+  simulatePayment(simulateButton, simulateForm, 'Simulated');
 
   if (testFaceCheckButton && faceCheckTestMode) {
     testFaceCheckButton.addEventListener('click', async () => {

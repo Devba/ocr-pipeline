@@ -30,6 +30,9 @@ services:
       # Cooldown entre OCR por IP (ms)
       OCR_COOLDOWN_MS: "${OCR_COOLDOWN_MS:-15000}"
 
+      # Botón extra para pruebas: desbloquea sin PayPal (NO usar en producción)
+      SIMULATE_PAYMENT_ENABLED: "${SIMULATE_PAYMENT_ENABLED:-0}"
+
       # Google Document AI (OCR) - opcional
       DOC_AI_ENABLED: "${DOC_AI_ENABLED:-0}"
       DOC_AI_PROJECT_ID: "${DOC_AI_PROJECT_ID:-}"

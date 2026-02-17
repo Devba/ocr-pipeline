@@ -55,6 +55,8 @@ const PAYPAL_UNLOCK_AMOUNT = String(process.env.PAYPAL_UNLOCK_AMOUNT || '1.00');
 const PAYPAL_ENABLED = Boolean(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET);
 const PAYPAL_API_BASE = PAYPAL_ENV === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
 
+const SIMULATE_PAYMENT_ENABLED = String(process.env.SIMULATE_PAYMENT_ENABLED || '').trim() === '1';
+
 const DOC_AI_ENABLED = process.env.DOC_AI_ENABLED === '1';
 const DOC_AI_PROJECT_ID = String(process.env.DOC_AI_PROJECT_ID || '').trim();
 const DOC_AI_LOCATION = String(process.env.DOC_AI_LOCATION || 'us').trim();
@@ -855,6 +857,7 @@ function buildViewModel(req, extra = {}) {
       paypalCreateOrderEndpoint: '/api/paypal/create-order',
       paypalCaptureOrderEndpoint: '/api/paypal/capture-order',
     },
+    simulatePaymentEnabled: SIMULATE_PAYMENT_ENABLED,
     paymentMessage: '',
     ...extra,
   };
@@ -1195,7 +1198,9 @@ app.post('/unlock', (req, res) => {
     const language = doc.language || selectedLanguage;
     const methodLabel = paymentMethod === 'paypal'
       ? i18next.t('payment.paypalLabel', { lng: language })
-      : i18next.t('payment.metamaskLabel', { lng: language });
+      : (paymentMethod === 'simulate'
+        ? i18next.t('payment.simulateLabel', { lng: language })
+        : i18next.t('payment.metamaskLabel', { lng: language }));
     const paymentMessage = i18next.t('messages.paymentSuccess', {
       lng: language,
       method: methodLabel,
@@ -1246,6 +1251,16 @@ app.post('/unlock', (req, res) => {
     }
     local.used = true;
     paypalOrders.set(orderId, local);
+  }
+
+  if (paymentMethod === 'simulate') {
+    if (!SIMULATE_PAYMENT_ENABLED) {
+      res.status(404);
+      return renderPage(req, res, {
+        error: i18next.t('errors.invalidRequest', { lng: selectedLanguage }),
+        selectedLanguage,
+      });
+    }
   }
 
   return finishUnlock(doc);

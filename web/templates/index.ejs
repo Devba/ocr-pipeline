@@ -234,6 +234,11 @@
         <input type="hidden" name="payment_method" value="metamask">
         <input type="hidden" name="language" value="<%= selectedLanguage %>">
       </form>
+      <form id="unlock-simulate" method="post" action="/unlock">
+        <input type="hidden" name="document_id" value="<%= documentId %>">
+        <input type="hidden" name="payment_method" value="simulate">
+        <input type="hidden" name="language" value="<%= selectedLanguage %>">
+      </form>
       <div class="actions">
         <% if (paymentConfig && paymentConfig.paypalEnabled && documentId) { %>
           <div id="paypal-buttons" style="min-width:260px;"></div>
@@ -241,6 +246,9 @@
           <p style="margin:0;"><%= t('errors.selectImage') %></p>
         <% } else { %>
           <p style="margin:0;"><%= t('errors.paypalNotConfigured') %></p>
+        <% } %>
+        <% if (typeof simulatePaymentEnabled !== 'undefined' && simulatePaymentEnabled && documentId) { %>
+          <button type="button" id="pay-simulate"><%= t('payment.simulateButton') %></button>
         <% } %>
         <button type="button" id="pay-metamask" <%= documentId ? '' : 'disabled' %>><%= t('payment.metamaskButton') %></button>
       </div>

@@ -72,7 +72,9 @@
   "payment": {
     "paypalLabel": "PayPal",
     "metamaskLabel": "MetaMask",
+    "simulateLabel": "محاكاة",
     "paypalButton": "الدفع عبر PayPal",
+    "simulateButton": "محاكاة الدفع",
     "metamaskButton": "الدفع عبر MetaMask (محاكاة)"
   },
   "messages": {
