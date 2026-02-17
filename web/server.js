@@ -160,6 +160,7 @@ const metricsState = {
     lastAt: 0,
     lastMs: 0,
     lastError: '',
+    lastErrorDetails: '',
     lastProvider: '',
     lastModel: '',
   },
@@ -273,6 +274,7 @@ function buildMetricsSnapshot(recentLimit = 50) {
       lastAt: Number(metricsState.postprocess.lastAt || 0),
       lastMs: Number(metricsState.postprocess.lastMs || 0),
       lastError: String(metricsState.postprocess.lastError || ''),
+      lastErrorDetails: String(metricsState.postprocess.lastErrorDetails || ''),
       lastProvider: String(metricsState.postprocess.lastProvider || ''),
       lastModel: String(metricsState.postprocess.lastModel || ''),
     },
@@ -328,7 +330,15 @@ async function generateWithVertex(prompt, { jobId } = {}) {
     throw new Error('VERTEX_NO_TOKEN');
   }
 
-  const endpoint = `https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(VERTEX_PROJECT_ID)}/locations/${encodeURIComponent(VERTEX_LOCATION)}/publishers/google/models/${encodeURIComponent(VERTEX_MODEL)}:generateContent`;
+  const pathPart = `/projects/${encodeURIComponent(VERTEX_PROJECT_ID)}/locations/${encodeURIComponent(VERTEX_LOCATION)}/publishers/google/models/${encodeURIComponent(VERTEX_MODEL)}:generateContent`;
+  const endpoints = [
+    `https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1${pathPart}`,
+    // Fallback: some Vertex GenAI features may be exposed via v1beta1 depending on rollout.
+    `https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1beta1${pathPart}`,
+    // Extra fallback: global hostname (still uses regional location in path)
+    `https://aiplatform.googleapis.com/v1${pathPart}`,
+    `https://aiplatform.googleapis.com/v1beta1${pathPart}`,
+  ];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), POSTPROCESS_TIMEOUT_MS);
 
@@ -347,32 +357,51 @@ async function generateWithVertex(prompt, { jobId } = {}) {
   };
 
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+    let lastError = null;
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      const err = new Error(`VERTEX_HTTP_${response.status}`);
-      err.details = text.slice(0, 500);
-      throw err;
+    for (const endpoint of endpoints) {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        const err = new Error(`VERTEX_HTTP_${response.status}`);
+        err.details = text.slice(0, 1200);
+        err.endpoint = endpoint;
+        lastError = err;
+
+        // Only retry on 404 between the fallback endpoints.
+        if (response.status === 404) {
+          continue;
+        }
+        throw err;
+      }
+
+      const data = await response.json();
+      const out = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+      if (!out) {
+        const err = new Error('VERTEX_EMPTY');
+        err.endpoint = endpoint;
+        throw err;
+      }
+      if (DOC_AI_DEBUG_LOG) {
+        console.log(`[postprocess] job=${jobId || 'n/a'} provider=vertex model=${VERTEX_MODEL} endpoint=${endpoint} inChars=${prompt.length} outChars=${out.length}`);
+      }
+      return out;
     }
 
-    const data = await response.json();
-    const out = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-    if (!out) {
-      throw new Error('VERTEX_EMPTY');
+    // If we exhausted fallbacks, throw the last error for visibility.
+    if (lastError) {
+      throw lastError;
     }
-    if (DOC_AI_DEBUG_LOG) {
-      console.log(`[postprocess] job=${jobId || 'n/a'} provider=vertex model=${VERTEX_MODEL} inChars=${prompt.length} outChars=${out.length}`);
-    }
-    return out;
+    throw new Error('VERTEX_NO_ENDPOINT');
   } finally {
     clearTimeout(timeout);
   }
@@ -409,6 +438,7 @@ async function postprocessTextIfEnabled(rawText, { jobId } = {}) {
     const corrected = await generateWithVertex(prompt, { jobId });
     metricsState.postprocess.lastMs = Date.now() - startedAt;
     metricsState.postprocess.lastError = '';
+    metricsState.postprocess.lastErrorDetails = '';
     return {
       ok: true,
       skipped: false,
@@ -419,11 +449,17 @@ async function postprocessTextIfEnabled(rawText, { jobId } = {}) {
     metricsState.postprocess.errors += 1;
     metricsState.postprocess.lastMs = Date.now() - startedAt;
     metricsState.postprocess.lastError = String(error?.message || 'POSTPROCESS_ERROR').slice(0, 240);
+    metricsState.postprocess.lastErrorDetails = String(error?.details || error?.endpoint || '').slice(0, 1200);
     return {
       ok: false,
       skipped: false,
       text: rawText,
-      meta: { provider: 'vertex', model: `${VERTEX_LOCATION}/${VERTEX_MODEL}`, error: metricsState.postprocess.lastError },
+      meta: {
+        provider: 'vertex',
+        model: `${VERTEX_LOCATION}/${VERTEX_MODEL}`,
+        error: metricsState.postprocess.lastError,
+        details: metricsState.postprocess.lastErrorDetails,
+      },
     };
   }
 }
