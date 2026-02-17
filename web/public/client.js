@@ -38,6 +38,42 @@
   const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.heic', '.heif']);
   let lastFaceCheckAt = 0;
   let photoStream = null;
+  let cameraCapturedFile = null;
+
+  async function submitMultipartWithFile(file, clientPreprocessed) {
+    if (!file) {
+      return;
+    }
+
+    setStatus(t('uploading', 'Enviando al servidor...'), false);
+
+    const action = form.getAttribute('action') || window.location.pathname || '/';
+    const url = new URL(action, window.location.origin);
+    const body = new FormData(form);
+
+    if (languageSelect && languageSelect.value && !body.has('language')) {
+      body.set('language', languageSelect.value);
+    }
+
+    body.delete('image');
+    body.append('image', file, file.name || `upload-${Date.now()}`);
+    body.set('client_preprocessed', clientPreprocessed ? '1' : '0');
+
+    try {
+      const response = await fetch(url.toString(), {
+        method: 'POST',
+        body,
+        credentials: 'same-origin',
+      });
+
+      const html = await response.text();
+      document.open();
+      document.write(html);
+      document.close();
+    } catch (_error) {
+      setStatus(t('uploadFailed', 'No se pudo enviar la imagen. Revisa tu conexión e inténtalo de nuevo.'), true);
+    }
+  }
 
   async function startPhotoCapture() {
     setStatus(t('cameraStart', 'Abriendo cámara...'), false);
@@ -119,12 +155,18 @@
     }
 
     const file = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
-    const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(file);
-    fileInput.files = dataTransfer.files;
+    cameraCapturedFile = file;
+    // Algunos navegadores (especialmente iOS Safari) no permiten asignar input.files.
+    // Intentamos para compatibilidad, pero no dependemos de ello.
+    try {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(file);
+      fileInput.files = dataTransfer.files;
+    } catch (_error) {
+    }
 
     stopPhotoCapture();
-    setStatus('', false);
+    setStatus(t('cameraReady', 'Foto capturada. Pulsa “Procesar OCR”.'), false);
   }
 
   const paymentConfig = window.PAYMENT_CONFIG || {};
@@ -387,7 +429,9 @@
 
   form.addEventListener('submit', async (event) => {
     let shouldManualSubmit = false;
-    const file = fileInput.files && fileInput.files[0];
+    const nativeFile = fileInput.files && fileInput.files[0];
+    const file = nativeFile || cameraCapturedFile;
+    const hasVirtualFile = !nativeFile && Boolean(cameraCapturedFile);
     if (!file) {
       return;
     }
@@ -452,8 +496,9 @@
 
     if (!clientPreprocessCheckbox.checked) {
       clientPreprocessedInput.value = '0';
-      if (shouldManualSubmit) {
-        form.submit();
+      if (shouldManualSubmit || hasVirtualFile) {
+        event.preventDefault();
+        await submitMultipartWithFile(file, false);
       }
       return;
     }
@@ -464,12 +509,9 @@
     try {
       const processedBlob = await preprocessInBrowser(file, profileSelect.value || 'historico');
       const processedFile = new File([processedBlob], 'preprocesada.png', { type: 'image/png' });
-      const dataTransfer = new DataTransfer();
-      dataTransfer.items.add(processedFile);
-      fileInput.files = dataTransfer.files;
       clientPreprocessedInput.value = '1';
       setStatus(t('preprocessingReady', 'Preprocesado listo. Enviando al servidor...'), false);
-      form.submit();
+      await submitMultipartWithFile(processedFile, true);
     } catch (error) {
       setStatus(error.message || t('preprocessingError', 'Error en preprocesado local.'), true);
     }

@@ -75,9 +75,12 @@
     "paypalButton": "使用 PayPal 支付",
     "metamaskButton": "使用 MetaMask 支付（模拟）"
   },
+    "cameraReady": "已拍摄照片。请点击\"开始OCR\"。",
   "messages": {
     "paymentSuccess": "已完成 {{method}} 模拟支付。完整文档已解锁。"
   },
+    "uploading": "正在发送到服务器...",
+    "uploadFailed": "无法上传图片。请检查网络连接后重试。",
   "mock": {
     "summaryLines": [
       "初步摘要（不完整）：",

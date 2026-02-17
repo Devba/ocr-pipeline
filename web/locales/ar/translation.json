@@ -75,9 +75,12 @@
     "paypalButton": "الدفع عبر PayPal",
     "metamaskButton": "الدفع عبر MetaMask (محاكاة)"
   },
+    "cameraReady": "تم التقاط الصورة. اضغط \"تشغيل OCR\".",
   "messages": {
     "paymentSuccess": "اكتمل الدفع التجريبي عبر {{method}}. تم فتح الوثيقة الكاملة."
   },
+    "uploading": "جارٍ الإرسال إلى الخادم...",
+    "uploadFailed": "تعذر رفع الصورة. تحقق من اتصالك وحاول مرة أخرى.",
   "mock": {
     "summaryLines": [
       "ملخص أولي (غير مكتمل):",

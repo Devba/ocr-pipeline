@@ -151,7 +151,7 @@
 
   <form id="ocr-form" method="post" enctype="multipart/form-data">
     <label for="image"><%= t('ui.imageLabel') %></label><br>
-    <input type="file" id="image" name="image" accept="image/*" capture="environment" required>
+    <input type="file" id="image" name="image" accept="image/*">
 
     <div style="margin-top:0.6rem;">
       <button type="button" id="take-photo"><%= t('ui.takePhotoButton') %></button>
@@ -258,9 +258,12 @@
       cameraNoSupport: <%- JSON.stringify(t('client.cameraNoSupport')) %>,
       cameraPermission: <%- JSON.stringify(t('client.cameraPermission')) %>,
       cameraCaptureFailed: <%- JSON.stringify(t('client.cameraCaptureFailed')) %>,
+      cameraReady: <%- JSON.stringify(t('client.cameraReady')) %>,
       preprocessing: <%- JSON.stringify(t('client.preprocessing')) %>,
       preprocessingReady: <%- JSON.stringify(t('client.preprocessingReady')) %>,
       preprocessingError: <%- JSON.stringify(t('client.preprocessingError')) %>,
+      uploading: <%- JSON.stringify(t('client.uploading')) %>,
+      uploadFailed: <%- JSON.stringify(t('client.uploadFailed')) %>,
       likelyPrintedWarning: <%- JSON.stringify(t('client.likelyPrintedWarning')) %>,
       likelyPrintedConfirm: <%- JSON.stringify(t('client.likelyPrintedConfirm')) %>,
       faceCheckStarting: <%- JSON.stringify(t('client.faceCheckStarting')) %>,

@@ -75,9 +75,12 @@
     "paypalButton": "Pagar com PayPal",
     "metamaskButton": "Pagar com MetaMask (simulado)"
   },
+    "cameraReady": "Foto capturada. Toque em \"Processar OCR\".",
   "messages": {
     "paymentSuccess": "Pagamento simulado com {{method}} concluído. Documento completo desbloqueado."
   },
+    "uploading": "Enviando ao servidor...",
+    "uploadFailed": "Não foi possível enviar a imagem. Verifique sua conexão e tente novamente.",
   "mock": {
     "summaryLines": [
       "Resumo preliminar (incompleto):",
