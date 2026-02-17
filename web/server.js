@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs/promises');
 const crypto = require('crypto');
+const childProcess = require('child_process');
 
 const express = require('express');
 const geoip = require('geoip-lite');
@@ -23,6 +24,7 @@ const DATA_DIR = path.join(BASE_DIR, 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const WORK_DIR = path.join(DATA_DIR, 'work');
 const JOBS_DIR = path.join(DATA_DIR, 'jobs');
+const TALLER_DIR = path.join(DATA_DIR, 'taller');
 const LOCALES_DIR = path.join(BASE_DIR, 'locales');
 
 const AUTH_DIR = path.join(DATA_DIR, 'auth');
@@ -818,7 +820,143 @@ async function ensureDirs() {
   await fs.mkdir(UPLOADS_DIR, { recursive: true });
   await fs.mkdir(WORK_DIR, { recursive: true });
   await fs.mkdir(JOBS_DIR, { recursive: true });
+  await fs.mkdir(TALLER_DIR, { recursive: true });
   await fs.mkdir(AUTH_DIR, { recursive: true });
+}
+
+function execFileAsync(file, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    childProcess.execFile(file, args, { timeout: 120000, maxBuffer: 20 * 1024 * 1024, ...options }, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        return reject(error);
+      }
+      return resolve({ stdout, stderr });
+    });
+  });
+}
+
+async function preprocessImageCustom(inputPath, outputPath, opts = {}) {
+  const scale = Number(opts.scale || 1);
+  const threshold = Number(opts.threshold);
+  const median = Number(opts.median);
+  const normalize = opts.normalize !== false;
+
+  const base = sharp(inputPath).rotate().grayscale();
+  const metadata = await base.metadata().catch(() => ({}));
+  const width = Number(metadata?.width || 0);
+  const scaledWidth = width && Number.isFinite(scale) && scale > 0 ? Math.round(width * scale) : null;
+
+  let pipeline = base;
+  if (scaledWidth && scaledWidth > 0 && scaledWidth !== width) {
+    pipeline = pipeline.resize({ width: scaledWidth, kernel: sharp.kernel.lanczos3 });
+  }
+  if (normalize) {
+    pipeline = pipeline.normalise();
+  }
+  if (Number.isFinite(median) && median >= 1) {
+    pipeline = pipeline.median(Math.min(7, Math.max(1, Math.round(median))));
+  }
+  if (Number.isFinite(threshold) && threshold >= 0) {
+    pipeline = pipeline.threshold(Math.min(255, Math.max(0, Math.round(threshold))));
+  }
+  await pipeline.png().toFile(outputPath);
+}
+
+async function runDocAiOcrDetailed(filePath, context = {}) {
+  const startedAt = Date.now();
+  const client = new docAiV1.DocumentProcessorServiceClient({
+    apiEndpoint: `${DOC_AI_LOCATION}-documentai.googleapis.com`,
+  });
+
+  const name = buildDocAiProcessorName(client);
+  const content = await fs.readFile(filePath);
+  const mimeType = getDocAiMimeType(filePath);
+
+  metricsState.docAi.requests += 1;
+  metricsState.docAi.bytes += content.length;
+  metricsState.docAi.lastAt = Date.now();
+  metricsState.docAi.lastBytes = content.length;
+
+  let result;
+  try {
+    const baseRequest = {
+      name,
+      rawDocument: { content, mimeType },
+    };
+
+    const requestWithHints = DOC_AI_LANGUAGE_HINTS.length > 0
+      ? {
+        ...baseRequest,
+        processOptions: {
+          ocrConfig: {
+            hints: {
+              languageHints: DOC_AI_LANGUAGE_HINTS,
+            },
+          },
+        },
+      }
+      : baseRequest;
+
+    try {
+      [result] = await client.processDocument(requestWithHints);
+    } catch (error) {
+      if (DOC_AI_LANGUAGE_HINTS.length > 0) {
+        [result] = await client.processDocument(baseRequest);
+      } else {
+        throw error;
+      }
+    }
+  } catch (error) {
+    metricsState.docAi.errors += 1;
+    metricsState.docAi.lastError = String(error?.message || 'DOC_AI_ERROR').slice(0, 240);
+    throw error;
+  } finally {
+    metricsState.docAi.lastMs = Date.now() - startedAt;
+  }
+
+  const pagesLen = Array.isArray(result?.document?.pages) ? result.document.pages.length : 0;
+  const pages = pagesLen > 0 ? pagesLen : (mimeType.startsWith('image/') ? 1 : 0);
+  metricsState.docAi.pages += pages;
+  metricsState.docAi.lastPages = pages;
+
+  if (DOC_AI_DEBUG_LOG) {
+    const jobId = context?.jobId ? String(context.jobId) : '';
+    const textChars = String(result?.document?.text || '').length;
+    console.log(`[docai] job=${jobId || 'n/a'} mime=${mimeType} bytes=${content.length} pages=${pages} chars=${textChars} ms=${metricsState.docAi.lastMs}`);
+  }
+
+  const text = String(result?.document?.text || '').trim();
+  return {
+    text,
+    meta: {
+      mimeType,
+      bytes: content.length,
+      pages,
+      ms: metricsState.docAi.lastMs,
+    },
+  };
+}
+
+async function runTesseractOcr(filePath, opts = {}) {
+  const lang = String(opts.lang || 'spa').trim() || 'spa';
+  const psm = String(opts.psm || '6').trim() || '6';
+  const startedAt = Date.now();
+
+  // Use stdout output mode to avoid temp files
+  // tesseract <in> stdout -l <lang> --psm <n>
+  const args = [filePath, 'stdout', '-l', lang, '--psm', psm];
+  try {
+    const { stdout } = await execFileAsync('tesseract', args, { env: process.env });
+    return { text: String(stdout || '').trim(), meta: { ms: Date.now() - startedAt, lang, psm } };
+  } catch (error) {
+    const message = String(error?.message || 'TESSERACT_ERROR');
+    const stderr = String(error?.stderr || '').slice(0, 400);
+    const err = new Error(stderr ? `${message}: ${stderr}` : message);
+    err.code = error?.code;
+    throw err;
+  }
 }
 
 async function loadAuthState() {
@@ -1688,6 +1826,304 @@ function requireAdminStatsToken(req, res, next) {
 
   return next();
 }
+
+async function listTallerRuns(limit = 20) {
+  const safeLimit = Math.max(1, Math.min(200, Number(limit) || 20));
+  const entries = await fs.readdir(TALLER_DIR, { withFileTypes: true }).catch(() => []);
+  const runs = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const runId = entry.name;
+    if (!/^[a-zA-Z0-9_-]{6,80}$/.test(runId)) continue;
+    const metaPath = path.join(TALLER_DIR, runId, 'meta.json');
+    try {
+      const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+      runs.push({
+        id: runId,
+        createdAt: String(meta?.createdAt || ''),
+        engine: String(meta?.engine || ''),
+        language: String(meta?.language || ''),
+        postprocess: meta?.postprocess || null,
+      });
+    } catch (_error) {
+    }
+  }
+  runs.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  return runs.slice(0, safeLimit);
+}
+
+async function loadTallerRun(runId) {
+  const safeId = String(runId || '').trim();
+  if (!/^[a-zA-Z0-9_-]{6,80}$/.test(safeId)) return null;
+  const dir = path.join(TALLER_DIR, safeId);
+  const metaPath = path.join(dir, 'meta.json');
+  try {
+    const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    const textRaw = await fs.readFile(path.join(dir, 'ocr_raw.txt'), 'utf8').catch(() => '');
+    const textFinal = await fs.readFile(path.join(dir, 'ocr_final.txt'), 'utf8').catch(() => '');
+    return { id: safeId, dir, meta, textRaw: String(textRaw || ''), textFinal: String(textFinal || '') };
+  } catch (_error) {
+    return null;
+  }
+}
+
+app.get('/admin/taller', requireAdminStatsToken, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const token = extractAdminToken(req);
+  const runs = await listTallerRuns(25);
+  const runId = String(req.query?.id || '').trim();
+  const run = runId ? await loadTallerRun(runId) : null;
+  return res.render('admin-taller', {
+    token,
+    runs,
+    selectedRun: run,
+    form: {
+      engine: String(req.query?.engine || 'docai'),
+      profile: String(req.query?.profile || 'historico'),
+      useCustom: String(req.query?.custom || '') === '1',
+      scale: String(req.query?.scale || '1.6'),
+      threshold: String(req.query?.threshold || '170'),
+      median: String(req.query?.median || '3'),
+      postprocess: String(req.query?.postprocess || '') === '1',
+      tesseractLang: String(req.query?.tlang || 'spa'),
+      tesseractPsm: String(req.query?.tpsm || '6'),
+    },
+    result: null,
+    error: '',
+  });
+});
+
+app.get('/admin/taller/run/:id', requireAdminStatsToken, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const token = extractAdminToken(req);
+  const runs = await listTallerRuns(25);
+  const run = await loadTallerRun(req.params.id);
+  if (!run) {
+    return res.status(404).render('admin-taller', {
+      token,
+      runs,
+      selectedRun: null,
+      form: { engine: 'docai', profile: 'historico', useCustom: false, scale: '1.6', threshold: '170', median: '3', postprocess: false, tesseractLang: 'spa', tesseractPsm: '6' },
+      result: null,
+      error: 'Run not found',
+    });
+  }
+  return res.render('admin-taller', {
+    token,
+    runs,
+    selectedRun: run,
+    form: { engine: 'docai', profile: 'historico', useCustom: false, scale: '1.6', threshold: '170', median: '3', postprocess: false, tesseractLang: 'spa', tesseractPsm: '6' },
+    result: null,
+    error: '',
+  });
+});
+
+app.get('/admin/taller/file/:id/:name', requireAdminStatsToken, async (req, res) => {
+  const runId = String(req.params.id || '').trim();
+  const safeId = /^[a-zA-Z0-9_-]{6,80}$/.test(runId) ? runId : '';
+  const requested = String(req.params.name || '').trim();
+  if (!safeId || !requested) {
+    return res.status(404).send('Not found');
+  }
+
+  const run = await loadTallerRun(safeId);
+  if (!run) {
+    return res.status(404).send('Not found');
+  }
+
+  const allowed = new Set(['original', 'preprocessed', 'meta.json', 'ocr_raw.txt', 'ocr_final.txt', 'postprocess.json']);
+  const files = run.meta?.files || {};
+  for (const key of ['original', 'preprocessed']) {
+    const name = files[key];
+    if (name && typeof name === 'string') {
+      allowed.add(name);
+    }
+  }
+
+  if (!allowed.has(requested)) {
+    return res.status(404).send('Not found');
+  }
+
+  const fullPath = path.join(run.dir, requested);
+  return res.sendFile(fullPath);
+});
+
+app.post('/admin/taller/run', requireAdminStatsToken, requestTimeoutMiddleware(120 * 1000), upload.single('image'), async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const token = extractAdminToken(req);
+  const runs = await listTallerRuns(25);
+
+  const engine = String(req.body?.engine || 'docai').trim();
+  const profile = String(req.body?.profile || 'historico').trim();
+  const useCustom = String(req.body?.custom_preprocess || '') === '1';
+  const scale = Number(req.body?.scale || 1.6);
+  const threshold = Number(req.body?.threshold || 170);
+  const median = Number(req.body?.median || 3);
+  const doPostprocess = String(req.body?.postprocess || '') === '1';
+  const tesseractLang = String(req.body?.tesseract_lang || 'spa').trim() || 'spa';
+  const tesseractPsm = String(req.body?.tesseract_psm || '6').trim() || '6';
+
+  const formState = {
+    engine,
+    profile,
+    useCustom,
+    scale: String(Number.isFinite(scale) ? scale : 1.6),
+    threshold: String(Number.isFinite(threshold) ? threshold : 170),
+    median: String(Number.isFinite(median) ? median : 3),
+    postprocess: doPostprocess,
+    tesseractLang,
+    tesseractPsm,
+  };
+
+  if (!req.file) {
+    return res.status(400).render('admin-taller', {
+      token,
+      runs,
+      selectedRun: null,
+      form: formState,
+      result: null,
+      error: 'No file uploaded',
+    });
+  }
+
+  const runId = randomId(12);
+  const runDir = path.join(TALLER_DIR, runId);
+  await fs.mkdir(runDir, { recursive: true });
+
+  const originalExt = path.extname(String(req.file.originalname || req.file.filename || '')).toLowerCase() || path.extname(String(req.file.path || '')).toLowerCase();
+  const originalName = `original${originalExt && originalExt.length <= 8 ? originalExt : '.bin'}`;
+  const originalPath = path.join(runDir, originalName);
+  try {
+    await fs.rename(req.file.path, originalPath);
+  } catch (_error) {
+    await fs.copyFile(req.file.path, originalPath);
+  }
+
+  const preprocessedName = 'preprocessed.png';
+  const preprocessedPath = path.join(runDir, preprocessedName);
+
+  let ocrInputPath = originalPath;
+  let preprocessMeta = null;
+  try {
+    if (useCustom) {
+      const safeScale = Number.isFinite(scale) ? Math.max(0.4, Math.min(4, scale)) : 1.6;
+      const safeThreshold = Number.isFinite(threshold) ? Math.max(0, Math.min(255, Math.round(threshold))) : 170;
+      const safeMedian = Number.isFinite(median) ? Math.max(0, Math.min(7, Math.round(median))) : 3;
+
+      await preprocessImageCustom(originalPath, preprocessedPath, {
+        scale: safeScale,
+        threshold: safeThreshold,
+        median: safeMedian,
+        normalize: true,
+      });
+      ocrInputPath = preprocessedPath;
+      preprocessMeta = { mode: 'custom', scale: safeScale, threshold: safeThreshold, median: safeMedian };
+    } else {
+      await preprocessImage(originalPath, preprocessedPath, profile);
+      ocrInputPath = preprocessedPath;
+      preprocessMeta = { mode: 'profile', profile };
+    }
+  } catch (error) {
+    return res.status(500).render('admin-taller', {
+      token,
+      runs,
+      selectedRun: null,
+      form: formState,
+      result: null,
+      error: `Preprocess failed: ${String(error?.message || error)}`,
+    });
+  }
+
+  let rawText = '';
+  let finalText = '';
+  let ocrMeta = null;
+  let postprocessMeta = null;
+
+  try {
+    if (engine === 'docai') {
+      if (!isDocAiConfigured()) {
+        throw new Error('DOC_AI_NOT_CONFIGURED');
+      }
+      const out = await runDocAiOcrDetailed(ocrInputPath, { jobId: runId });
+      rawText = out.text;
+      ocrMeta = { provider: 'docai', ...out.meta };
+    } else if (engine === 'tesseract') {
+      const ext = path.extname(String(ocrInputPath || '')).toLowerCase();
+      if (ext === '.pdf') {
+        throw new Error('TESSERACT_PDF_NOT_SUPPORTED');
+      }
+      const out = await runTesseractOcr(ocrInputPath, { lang: tesseractLang, psm: tesseractPsm });
+      rawText = out.text;
+      ocrMeta = { provider: 'tesseract', ...out.meta };
+    } else {
+      throw new Error('ENGINE_NOT_SUPPORTED');
+    }
+
+    const post = doPostprocess
+      ? await postprocessTextIfEnabled(rawText, { jobId: runId })
+      : { ok: false, skipped: true, text: rawText, meta: { provider: POSTPROCESS_PROVIDER, model: '', reason: 'disabled_in_taller' } };
+
+    finalText = post.text;
+    postprocessMeta = post.meta || null;
+
+    await fs.writeFile(path.join(runDir, 'ocr_raw.txt'), String(rawText || '').trimEnd() + '\n', 'utf8');
+    await fs.writeFile(path.join(runDir, 'ocr_final.txt'), String(finalText || '').trimEnd() + '\n', 'utf8');
+    if (postprocessMeta) {
+      await fs.writeFile(path.join(runDir, 'postprocess.json'), JSON.stringify(postprocessMeta, null, 2) + '\n', 'utf8');
+    }
+
+    const meta = {
+      id: runId,
+      createdAt: new Date().toISOString(),
+      engine,
+      language: engine === 'tesseract' ? tesseractLang : DOC_AI_LANGUAGE_HINTS.join(','),
+      preprocess: preprocessMeta,
+      ocr: ocrMeta,
+      postprocess: postprocessMeta,
+      upload: {
+        originalName: String(req.file.originalname || ''),
+        mimeType: String(req.file.mimetype || ''),
+        size: Number(req.file.size || 0),
+      },
+      files: {
+        original: originalName,
+        preprocessed: preprocessedName,
+        raw: 'ocr_raw.txt',
+        final: 'ocr_final.txt',
+        postprocess: postprocessMeta ? 'postprocess.json' : null,
+        meta: 'meta.json',
+      },
+    };
+    await fs.writeFile(path.join(runDir, 'meta.json'), JSON.stringify(meta, null, 2) + '\n', 'utf8');
+
+    const selectedRun = await loadTallerRun(runId);
+
+    return res.render('admin-taller', {
+      token,
+      runs: await listTallerRuns(25),
+      selectedRun,
+      form: formState,
+      result: {
+        runId,
+        rawText,
+        finalText,
+        preprocess: preprocessMeta,
+        ocr: ocrMeta,
+        postprocess: postprocessMeta,
+      },
+      error: '',
+    });
+  } catch (error) {
+    return res.status(500).render('admin-taller', {
+      token,
+      runs,
+      selectedRun: null,
+      form: formState,
+      result: null,
+      error: `Run failed: ${String(error?.message || error)}`,
+    });
+  }
+});
 
 app.get('/admin/stats', requireAdminStatsToken, (req, res) => {
   res.setHeader('Cache-Control', 'no-store');

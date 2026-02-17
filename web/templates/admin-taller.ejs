@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Taller</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 1200px; margin: 1.5rem auto; padding: 0 1rem; }
+    .top { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
+    .pill { display:inline-block; font-size: 12px; padding: 0.25rem 0.6rem; border: 1px solid #ddd; border-radius: 999px; text-decoration:none; color:#222; background:#fff; }
+    .layout { display:grid; grid-template-columns: 360px 1fr; gap: 1rem; margin-top: 1rem; }
+    .card { border:1px solid #ddd; border-radius:10px; padding:1rem; background:#fff; }
+    @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+    label { font-size: 13px; color:#333; }
+    input, select { padding: 0.45rem 0.55rem; }
+    .row { display:flex; gap:0.75rem; flex-wrap:wrap; }
+    .row > div { display:flex; flex-direction:column; gap:0.25rem; min-width: 160px; }
+    .muted { color:#555; font-size: 12px; }
+    .error { color:#b91c1c; }
+    textarea { width: 100%; min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; padding: 0.6rem; }
+    .runs { max-height: 520px; overflow:auto; }
+    .runs a { display:block; padding: 0.45rem 0.5rem; border-bottom: 1px solid #eee; text-decoration:none; color:#222; }
+    .runs a:hover { background:#fafafa; }
+    .kv { display:grid; grid-template-columns: 160px 1fr; gap:0.25rem 0.75rem; font-size: 12px; }
+    .kv div:nth-child(odd) { color:#555; }
+    .hr { border-top:1px solid #eee; margin: 0.8rem 0; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <h1 style="margin:0;">Admin Taller</h1>
+      <div class="muted">Desktop-only test bench for upload → preprocess → OCR → postprocess</div>
+    </div>
+    <div>
+      <a class="pill" href="/">Home</a>
+      <a class="pill" href="/admin/stats/dashboard?token=<%= encodeURIComponent(token || '') %>">Stats</a>
+      <a class="pill" href="/admin/taller?token=<%= encodeURIComponent(token || '') %>">Taller</a>
+    </div>
+  </div>
+
+  <% if (error) { %>
+    <div class="card" style="margin-top:1rem;">
+      <div class="error"><strong>Error:</strong> <%= error %></div>
+    </div>
+  <% } %>
+
+  <div class="layout">
+    <div class="card">
+      <h2 style="margin-top:0; font-size:16px;">Runs</h2>
+      <div class="muted">Saved under <code>/app/data/taller/</code></div>
+      <div class="runs" style="margin-top:0.6rem;">
+        <% (runs || []).forEach((r) => { %>
+          <a href="/admin/taller/run/<%= encodeURIComponent(r.id) %>?token=<%= encodeURIComponent(token || '') %>">
+            <div><strong><%= r.id %></strong></div>
+            <div class="muted"><%= r.createdAt || '' %> · <%= r.engine || '' %></div>
+          </a>
+        <% }) %>
+        <% if (!runs || runs.length === 0) { %>
+          <div class="muted">No runs yet.</div>
+        <% } %>
+      </div>
+
+      <% if (selectedRun) { %>
+        <div class="hr"></div>
+        <h3 style="margin:0 0 0.4rem 0; font-size:14px;">Selected</h3>
+        <div class="kv">
+          <div>Run ID</div><div><strong><%= selectedRun.id %></strong></div>
+          <div>Created</div><div><%= selectedRun.meta?.createdAt || '' %></div>
+          <div>Engine</div><div><%= selectedRun.meta?.engine || '' %></div>
+          <div>Preprocess</div><div><%= JSON.stringify(selectedRun.meta?.preprocess || {}) %></div>
+          <div>OCR meta</div><div><%= JSON.stringify(selectedRun.meta?.ocr || {}) %></div>
+          <div>Postprocess</div><div><%= JSON.stringify(selectedRun.meta?.postprocess || null) %></div>
+        </div>
+        <div class="hr"></div>
+        <div class="row">
+          <div>
+            <label>Original</label>
+            <a class="pill" href="/admin/taller/file/<%= encodeURIComponent(selectedRun.id) %>/<%= encodeURIComponent(selectedRun.meta?.files?.original || 'original') %>?token=<%= encodeURIComponent(token || '') %>">download</a>
+          </div>
+          <div>
+            <label>Preprocessed</label>
+            <a class="pill" href="/admin/taller/file/<%= encodeURIComponent(selectedRun.id) %>/<%= encodeURIComponent(selectedRun.meta?.files?.preprocessed || 'preprocessed.png') %>?token=<%= encodeURIComponent(token || '') %>">download</a>
+          </div>
+          <div>
+            <label>Meta</label>
+            <a class="pill" href="/admin/taller/file/<%= encodeURIComponent(selectedRun.id) %>/meta.json?token=<%= encodeURIComponent(token || '') %>">meta.json</a>
+          </div>
+        </div>
+      <% } %>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2 style="margin-top:0; font-size:16px;">New run</h2>
+        <form method="POST" action="/admin/taller/run?token=<%= encodeURIComponent(token || '') %>" enctype="multipart/form-data">
+          <div class="row">
+            <div>
+              <label>Engine</label>
+              <select name="engine">
+                <option value="docai" <%= form?.engine === 'docai' ? 'selected' : '' %>>Google Document AI</option>
+                <option value="tesseract" <%= form?.engine === 'tesseract' ? 'selected' : '' %>>Tesseract</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Upload</label>
+              <input type="file" name="image" accept="image/*,.tif,.tiff,.png,.jpg,.jpeg" required>
+            </div>
+          </div>
+
+          <div class="hr"></div>
+          <h3 style="margin:0 0 0.4rem 0; font-size:14px;">Preprocess</h3>
+          <div class="row">
+            <div>
+              <label>Mode</label>
+              <select name="custom_preprocess">
+                <option value="0" <%= form?.useCustom ? '' : 'selected' %>>Profile</option>
+                <option value="1" <%= form?.useCustom ? 'selected' : '' %>>Custom</option>
+              </select>
+              <div class="muted">Profile uses existing pipeline; Custom uses scale/median/threshold.</div>
+            </div>
+
+            <div>
+              <label>Profile</label>
+              <select name="profile">
+                <option value="historico" <%= (form?.profile || '') === 'historico' ? 'selected' : '' %>>historico</option>
+                <option value="default" <%= (form?.profile || '') === 'default' ? 'selected' : '' %>>default</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Scale</label>
+              <input name="scale" value="<%= form?.scale || '1.6' %>">
+            </div>
+            <div>
+              <label>Median</label>
+              <input name="median" value="<%= form?.median || '3' %>">
+            </div>
+            <div>
+              <label>Threshold</label>
+              <input name="threshold" value="<%= form?.threshold || '170' %>">
+            </div>
+          </div>
+
+          <div class="hr"></div>
+          <h3 style="margin:0 0 0.4rem 0; font-size:14px;">OCR options</h3>
+          <div class="row">
+            <div>
+              <label>Tesseract lang</label>
+              <input name="tesseract_lang" value="<%= form?.tesseractLang || 'spa' %>">
+              <div class="muted">Example: <code>spa</code> or <code>spa+lat</code></div>
+            </div>
+            <div>
+              <label>Tesseract PSM</label>
+              <input name="tesseract_psm" value="<%= form?.tesseractPsm || '6' %>">
+            </div>
+          </div>
+
+          <div class="hr"></div>
+          <h3 style="margin:0 0 0.4rem 0; font-size:14px;">Postprocess</h3>
+          <div class="row">
+            <div>
+              <label>Run postprocess</label>
+              <select name="postprocess">
+                <option value="0" <%= form?.postprocess ? '' : 'selected' %>>off</option>
+                <option value="1" <%= form?.postprocess ? 'selected' : '' %>>on (Vertex if configured)</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="margin-top:0.9rem;">
+            <button type="submit" style="padding:0.6rem 1rem;">Run</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card" style="margin-top:1rem;">
+        <h2 style="margin-top:0; font-size:16px;">Result</h2>
+        <% if (result) { %>
+          <div class="kv">
+            <div>Run ID</div><div><strong><%= result.runId %></strong> (<a href="/admin/taller/run/<%= encodeURIComponent(result.runId) %>?token=<%= encodeURIComponent(token || '') %>">open</a>)</div>
+            <div>Preprocess</div><div><%= JSON.stringify(result.preprocess || {}) %></div>
+            <div>OCR meta</div><div><%= JSON.stringify(result.ocr || {}) %></div>
+            <div>Postprocess</div><div><%= JSON.stringify(result.postprocess || null) %></div>
+          </div>
+
+          <div class="hr"></div>
+          <h3 style="margin:0 0 0.4rem 0; font-size:14px;">OCR raw</h3>
+          <textarea readonly><%= result.rawText || '' %></textarea>
+
+          <h3 style="margin:0.8rem 0 0.4rem 0; font-size:14px;">OCR final</h3>
+          <textarea readonly><%= result.finalText || '' %></textarea>
+        <% } else if (selectedRun) { %>
+          <div class="muted">Loaded saved run: <strong><%= selectedRun.id %></strong></div>
+
+          <div class="hr"></div>
+          <h3 style="margin:0 0 0.4rem 0; font-size:14px;">OCR raw</h3>
+          <textarea readonly><%= selectedRun.textRaw || '' %></textarea>
+
+          <h3 style="margin:0.8rem 0 0.4rem 0; font-size:14px;">OCR final</h3>
+          <textarea readonly><%= selectedRun.textFinal || '' %></textarea>
+        <% } else { %>
+          <div class="muted">Run a test to see output here.</div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
