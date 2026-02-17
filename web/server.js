@@ -32,7 +32,11 @@ const AUTH_COOKIE_NAME = String(process.env.AUTH_COOKIE_NAME || 'mscr_session').
 const AUTH_SESSION_TTL_MS = Number(process.env.AUTH_SESSION_TTL_MS || 14 * 24 * 60 * 60 * 1000);
 const AUTH_MAGICLINK_TTL_MS = Number(process.env.AUTH_MAGICLINK_TTL_MS || 15 * 60 * 1000);
 const AUTH_METAMASK_NONCE_TTL_MS = Number(process.env.AUTH_METAMASK_NONCE_TTL_MS || 10 * 60 * 1000);
-const AUTH_TOKEN_SECRET = String(process.env.AUTH_TOKEN_SECRET || FACE_CHALLENGE_SECRET).trim();
+const AUTH_TOKEN_SECRET = String(
+  process.env.AUTH_TOKEN_SECRET
+  || process.env.FACE_ANTIBOT_SECRET
+  || 'change-this-auth-secret',
+).trim();
 
 const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.heic', '.heif', '.pdf']);
 const mockDocuments = new Map();
