@@ -151,7 +151,7 @@
 
   <form id="ocr-form" method="post" enctype="multipart/form-data" action="/">
     <label for="image"><%= t('ui.imageLabel') %></label><br>
-    <input type="file" id="image" name="image" accept="image/*">
+    <input type="file" id="image" name="image" accept="image/*,application/pdf">
 
     <div style="margin-top:0.6rem;">
       <button type="button" id="take-photo"><%= t('ui.takePhotoButton') %></button>

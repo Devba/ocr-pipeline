@@ -37,7 +37,7 @@
     return ui[key] || fallback;
   }
 
-  const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.heic', '.heif']);
+  const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.heic', '.heif', '.pdf']);
   let lastFaceCheckAt = 0;
   let photoStream = null;
   let cameraCapturedFile = null;
@@ -466,6 +466,7 @@
     const ext = getExtension(file.name);
     const mime = String(file.type || '').toLowerCase();
     const looksLikeImage = mime.startsWith('image/');
+    const looksLikePdf = mime === 'application/pdf' || ext === '.pdf';
 
     if (ext) {
       if (!allowedExtensions.has(ext)) {
@@ -473,9 +474,17 @@
         setStatus(t('unsupportedFormat', 'Formato no permitido. Usa PNG, JPG, JPEG, TIF o TIFF.'), true);
         return;
       }
-    } else if (!looksLikeImage) {
+    } else if (!looksLikeImage && !looksLikePdf) {
       event.preventDefault();
       setStatus(t('unsupportedFormat', 'Formato no permitido. Usa PNG, JPG, JPEG, TIF o TIFF.'), true);
+      return;
+    }
+
+    // PDF: no validación por imagen, ni preprocesado en Canvas.
+    if (looksLikePdf) {
+      event.preventDefault();
+      clientPreprocessedInput.value = '0';
+      await submitMultipartWithFile(file, false);
       return;
     }
 

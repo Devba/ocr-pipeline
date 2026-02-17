@@ -12,6 +12,7 @@ const multer = require('multer');
 const sharp = require('sharp');
 const nodemailer = require('nodemailer');
 const { v1: docAiV1 } = require('@google-cloud/documentai');
+const { GoogleAuth } = require('google-auth-library');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -23,7 +24,7 @@ const WORK_DIR = path.join(DATA_DIR, 'work');
 const JOBS_DIR = path.join(DATA_DIR, 'jobs');
 const LOCALES_DIR = path.join(BASE_DIR, 'locales');
 
-const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.heic', '.heif']);
+const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.heic', '.heif', '.pdf']);
 const mockDocuments = new Map();
 const SUPPORTED_LANGUAGES = ['es', 'en', 'pt', 'fr', 'zh', 'ar'];
 const LANGUAGE_OPTIONS = [
@@ -64,6 +65,30 @@ const DOC_AI_PROCESSOR_ID = String(process.env.DOC_AI_PROCESSOR_ID || '').trim()
 const DOC_AI_PROCESSOR_VERSION_ID = String(process.env.DOC_AI_PROCESSOR_VERSION_ID || '').trim();
 const DOC_AI_SUMMARY_CHARS = Number(process.env.DOC_AI_SUMMARY_CHARS || 1200);
 const DOC_AI_DEBUG_LOG = String(process.env.DOC_AI_DEBUG_LOG || '').trim() === '1';
+const DOC_AI_LANGUAGE_HINTS = String(process.env.DOC_AI_LANGUAGE_HINTS || 'es,la')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean)
+  .slice(0, 8);
+
+const POSTPROCESS_ENABLED = String(process.env.POSTPROCESS_ENABLED || '').trim() === '1';
+const POSTPROCESS_PROVIDER = String(process.env.POSTPROCESS_PROVIDER || 'vertex').trim().toLowerCase();
+const POSTPROCESS_MAX_CHARS = (() => {
+  const raw = Number(process.env.POSTPROCESS_MAX_CHARS || 20000);
+  return Number.isFinite(raw) ? Math.max(2000, Math.min(200000, Math.round(raw))) : 20000;
+})();
+const POSTPROCESS_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.POSTPROCESS_TIMEOUT_MS || 20000);
+  return Number.isFinite(raw) ? Math.max(2000, Math.min(120000, Math.round(raw))) : 20000;
+})();
+const VERTEX_PROJECT_ID = String(process.env.VERTEX_PROJECT_ID || DOC_AI_PROJECT_ID || '').trim();
+const VERTEX_LOCATION = String(process.env.VERTEX_LOCATION || 'us-central1').trim();
+const VERTEX_MODEL = String(process.env.VERTEX_MODEL || 'gemini-1.5-flash').trim();
+const POSTPROCESS_LANGUAGE_HINTS = String(process.env.POSTPROCESS_LANGUAGE_HINTS || DOC_AI_LANGUAGE_HINTS.join(','))
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean)
+  .slice(0, 8);
 
 const DOC_AI_MIME_BY_EXT = {
   '.png': 'image/png',
@@ -110,6 +135,16 @@ const metricsState = {
     lastPages: 0,
     lastBytes: 0,
     lastError: '',
+  },
+  postprocess: {
+    runs: 0,
+    skippedTooLong: 0,
+    errors: 0,
+    lastAt: 0,
+    lastMs: 0,
+    lastError: '',
+    lastProvider: '',
+    lastModel: '',
   },
   statusCounts: new Map(),
   methodCounts: new Map(),
@@ -209,6 +244,19 @@ function buildMetricsSnapshot() {
       lastBytes: Number(metricsState.docAi.lastBytes || 0),
       lastError: String(metricsState.docAi.lastError || ''),
     },
+    postprocess: {
+      enabled: POSTPROCESS_ENABLED,
+      provider: POSTPROCESS_PROVIDER,
+      model: POSTPROCESS_PROVIDER === 'vertex' ? `${VERTEX_LOCATION}/${VERTEX_MODEL}` : '',
+      runs: Number(metricsState.postprocess.runs || 0),
+      skippedTooLong: Number(metricsState.postprocess.skippedTooLong || 0),
+      errors: Number(metricsState.postprocess.errors || 0),
+      lastAt: Number(metricsState.postprocess.lastAt || 0),
+      lastMs: Number(metricsState.postprocess.lastMs || 0),
+      lastError: String(metricsState.postprocess.lastError || ''),
+      lastProvider: String(metricsState.postprocess.lastProvider || ''),
+      lastModel: String(metricsState.postprocess.lastModel || ''),
+    },
     uniqueVisitors24h: metricsState.uniqueVisitors.size,
     bots: {
       botUserAgentHits: metricsState.botUserAgentHits,
@@ -223,6 +271,142 @@ function buildMetricsSnapshot() {
     methodCounts: topEntries(metricsState.methodCounts, 20),
     recentEvents: metricsState.recentEvents.slice(-50),
   };
+}
+
+function shouldRunPostprocess() {
+  if (!POSTPROCESS_ENABLED) {
+    return false;
+  }
+  if (POSTPROCESS_PROVIDER !== 'vertex') {
+    return false;
+  }
+  return Boolean(VERTEX_PROJECT_ID && VERTEX_LOCATION && VERTEX_MODEL);
+}
+
+function buildPostprocessPrompt(rawText) {
+  const hints = POSTPROCESS_LANGUAGE_HINTS.length > 0 ? POSTPROCESS_LANGUAGE_HINTS.join(', ') : 'es, la';
+  return [
+    'Corrige y moderniza esta transcripción OCR de un manuscrito antiguo (España, s. XVIII–XIX).',
+    'Mantén la fidelidad al texto original: no inventes contenido ni nombres.',
+    'Corrige errores típicos de OCR en letra cursiva antigua (confusiones i/l, rn/m, s/f, etc.).',
+    'Respeta saltos de línea y párrafos cuando tenga sentido; no lo conviertas todo en un solo bloque.',
+    'Completa abreviaturas comunes SOLO cuando sea muy probable; si dudas, conserva el original.',
+    `Idiomas/pistas: ${hints}.`,
+    '',
+    'Devuelve únicamente el texto corregido, sin explicaciones.',
+    '',
+    'Texto crudo:',
+    rawText,
+  ].join('\n');
+}
+
+async function generateWithVertex(prompt, { jobId } = {}) {
+  const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+  const client = await auth.getClient();
+  const tokenResponse = await client.getAccessToken();
+  const accessToken = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token;
+  if (!accessToken) {
+    throw new Error('VERTEX_NO_TOKEN');
+  }
+
+  const endpoint = `https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(VERTEX_PROJECT_ID)}/locations/${encodeURIComponent(VERTEX_LOCATION)}/publishers/google/models/${encodeURIComponent(VERTEX_MODEL)}:generateContent`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), POSTPROCESS_TIMEOUT_MS);
+
+  const body = {
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: prompt }],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.2,
+      maxOutputTokens: 2048,
+      topP: 0.95,
+    },
+  };
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      const err = new Error(`VERTEX_HTTP_${response.status}`);
+      err.details = text.slice(0, 500);
+      throw err;
+    }
+
+    const data = await response.json();
+    const out = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+    if (!out) {
+      throw new Error('VERTEX_EMPTY');
+    }
+    if (DOC_AI_DEBUG_LOG) {
+      console.log(`[postprocess] job=${jobId || 'n/a'} provider=vertex model=${VERTEX_MODEL} inChars=${prompt.length} outChars=${out.length}`);
+    }
+    return out;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function postprocessTextIfEnabled(rawText, { jobId } = {}) {
+  if (!shouldRunPostprocess()) {
+    return { ok: false, skipped: true, text: rawText, meta: { provider: POSTPROCESS_PROVIDER, model: '' } };
+  }
+
+  const normalized = String(rawText || '').trim();
+  if (!normalized) {
+    return { ok: false, skipped: true, text: rawText, meta: { provider: POSTPROCESS_PROVIDER, model: '' } };
+  }
+
+  if (normalized.length > POSTPROCESS_MAX_CHARS) {
+    metricsState.postprocess.skippedTooLong += 1;
+    return {
+      ok: false,
+      skipped: true,
+      text: rawText,
+      meta: { provider: POSTPROCESS_PROVIDER, model: `${VERTEX_LOCATION}/${VERTEX_MODEL}`, reason: 'too_long' },
+    };
+  }
+
+  metricsState.postprocess.runs += 1;
+  metricsState.postprocess.lastAt = Date.now();
+  metricsState.postprocess.lastProvider = 'vertex';
+  metricsState.postprocess.lastModel = `${VERTEX_LOCATION}/${VERTEX_MODEL}`;
+  const startedAt = Date.now();
+
+  try {
+    const prompt = buildPostprocessPrompt(normalized);
+    const corrected = await generateWithVertex(prompt, { jobId });
+    metricsState.postprocess.lastMs = Date.now() - startedAt;
+    metricsState.postprocess.lastError = '';
+    return {
+      ok: true,
+      skipped: false,
+      text: corrected,
+      meta: { provider: 'vertex', model: `${VERTEX_LOCATION}/${VERTEX_MODEL}`, ms: metricsState.postprocess.lastMs },
+    };
+  } catch (error) {
+    metricsState.postprocess.errors += 1;
+    metricsState.postprocess.lastMs = Date.now() - startedAt;
+    metricsState.postprocess.lastError = String(error?.message || 'POSTPROCESS_ERROR').slice(0, 240);
+    return {
+      ok: false,
+      skipped: false,
+      text: rawText,
+      meta: { provider: 'vertex', model: `${VERTEX_LOCATION}/${VERTEX_MODEL}`, error: metricsState.postprocess.lastError },
+    };
+  }
 }
 
 function isValidMoneyAmount(value) {
@@ -557,6 +741,7 @@ const upload = multer({
     const ext = path.extname(file.originalname).toLowerCase();
     const mime = String(file.mimetype || '').toLowerCase();
     const looksLikeImage = mime.startsWith('image/');
+    const looksLikePdf = mime === 'application/pdf';
 
     if (ext) {
       if (!ALLOWED_EXTENSIONS.has(ext)) {
@@ -565,7 +750,7 @@ const upload = multer({
         err.code = 'UNSUPPORTED_FORMAT';
         return cb(err);
       }
-    } else if (!looksLikeImage) {
+    } else if (!looksLikeImage && !looksLikePdf) {
       metricsState.unsupportedFormatHits += 1;
       const err = new Error(req.t('errors.unsupportedFormat'));
       err.code = 'UNSUPPORTED_FORMAT';
@@ -607,6 +792,7 @@ function buildJobPaths(jobId, originalExt = '') {
     preprocessedPath: path.join(jobDir, 'preprocessed.png'),
     summaryPath: path.join(jobDir, 'summary.txt'),
     fullPath: path.join(jobDir, 'full.txt'),
+    fullRawPath: path.join(jobDir, 'full_raw.txt'),
     metaPath: path.join(jobDir, 'meta.json'),
   };
 }
@@ -617,12 +803,14 @@ async function persistJob({
   preprocessedPath,
   summaryText,
   fullText,
+  fullTextRaw,
   language,
   profile,
   psm,
   engine,
   clientPreprocessed,
   ipHash,
+  postprocess,
 }) {
   const safeId = safeJobId(jobId);
   if (!safeId) {
@@ -651,6 +839,9 @@ async function persistJob({
 
   await fs.writeFile(paths.summaryPath, String(summaryText || '').trimEnd() + '\n', 'utf8');
   await fs.writeFile(paths.fullPath, String(fullText || '').trimEnd() + '\n', 'utf8');
+  if (fullTextRaw) {
+    await fs.writeFile(paths.fullRawPath, String(fullTextRaw || '').trimEnd() + '\n', 'utf8');
+  }
 
   const meta = {
     id: safeId,
@@ -660,6 +851,7 @@ async function persistJob({
     profile: String(profile || ''),
     psm: String(psm || ''),
     clientPreprocessed: Boolean(clientPreprocessed),
+    postprocess: postprocess || null,
     ip: String(ipHash || ''),
     upload: uploadedFile ? {
       originalName: String(uploadedFile.originalname || ''),
@@ -672,6 +864,7 @@ async function persistJob({
       preprocessed: await pathExists(paths.preprocessedPath) ? path.basename(paths.preprocessedPath) : null,
       summary: path.basename(paths.summaryPath),
       full: path.basename(paths.fullPath),
+      fullRaw: fullTextRaw ? path.basename(paths.fullRawPath) : null,
       meta: path.basename(paths.metaPath),
     },
   };
@@ -775,13 +968,37 @@ async function runDocAiOcr(filePath, context = {}) {
 
   let result;
   try {
-    [result] = await client.processDocument({
+    const baseRequest = {
       name,
       rawDocument: {
         content,
         mimeType,
       },
-    });
+    };
+
+    const requestWithHints = DOC_AI_LANGUAGE_HINTS.length > 0
+      ? {
+        ...baseRequest,
+        processOptions: {
+          ocrConfig: {
+            hints: {
+              languageHints: DOC_AI_LANGUAGE_HINTS,
+            },
+          },
+        },
+      }
+      : baseRequest;
+
+    try {
+      [result] = await client.processDocument(requestWithHints);
+    } catch (error) {
+      // Fallback seguro si el processor no acepta hints / opciones.
+      if (DOC_AI_LANGUAGE_HINTS.length > 0) {
+        [result] = await client.processDocument(baseRequest);
+      } else {
+        throw error;
+      }
+    }
   } catch (error) {
     metricsState.docAi.errors += 1;
     metricsState.docAi.lastError = String(error?.message || 'DOC_AI_ERROR').slice(0, 240);
@@ -1129,17 +1346,27 @@ app.post('/', ocrLimiter, requestTimeoutMiddleware(45 * 1000), upload.single('im
   const preprocessedPath = path.join(WORK_DIR, `${jobId}_preprocessed.png`);
   try {
     let ocrInputPath = req.file.path;
-    if (!clientPreprocessed) {
+    const uploadExt = path.extname(String(req.file.originalname || req.file.filename || '')).toLowerCase();
+    const uploadMime = String(req.file.mimetype || '').toLowerCase();
+    const isPdf = uploadExt === '.pdf' || uploadMime === 'application/pdf';
+
+    if (!clientPreprocessed && !isPdf) {
       await preprocessImage(req.file.path, preprocessedPath, selectedProfile);
       ocrInputPath = preprocessedPath;
     }
 
     let summaryText = '';
     let fullText = '';
+    let fullTextRaw = '';
+    let postprocessMeta = null;
 
     const engine = isDocAiConfigured() ? 'docai' : 'mock';
     if (engine === 'docai') {
-      fullText = await runDocAiOcr(ocrInputPath, { jobId });
+      const raw = await runDocAiOcr(ocrInputPath, { jobId });
+      const post = await postprocessTextIfEnabled(raw, { jobId });
+      fullText = post.text;
+      fullTextRaw = raw;
+      postprocessMeta = post.meta;
       summaryText = buildSummaryFromFullText(fullText);
     } else {
       summaryText = buildMockSummary(selectedLanguage);
@@ -1155,12 +1382,14 @@ app.post('/', ocrLimiter, requestTimeoutMiddleware(45 * 1000), upload.single('im
       preprocessedPath: ocrInputPath === preprocessedPath ? preprocessedPath : null,
       summaryText,
       fullText,
+      fullTextRaw,
       language: selectedLanguage,
       profile: selectedProfile,
       psm: selectedPsm,
       engine,
-      clientPreprocessed,
+      clientPreprocessed: Boolean(clientPreprocessed && !isPdf),
       ipHash: visitorKey,
+      postprocess: postprocessMeta || null,
     });
 
     return renderPage(req, res, {
