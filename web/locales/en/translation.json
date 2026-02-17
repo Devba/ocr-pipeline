@@ -108,6 +108,7 @@
     "preprocessingError": "Local preprocessing error.",
     "uploading": "Sending to server...",
     "uploadFailed": "Could not upload the image. Check your connection and try again.",
+    "cooldownWait": "Please wait {{seconds}} seconds before trying again.",
     "likelyNoTextWarning": "The image seems to contain no readable text for OCR.",
     "likelyNoTextConfirm": "This looks like a photo without text (for example, a face). Continue anyway?",
     "likelyPrintedWarning": "The image looks like machine-typed or digital text, not handwritten.",

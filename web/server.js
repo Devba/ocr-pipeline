@@ -36,7 +36,13 @@ const LANGUAGE_OPTIONS = [
 ];
 const RTL_LANGUAGES = new Set(['ar']);
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
-const OCR_COOLDOWN_MS = 15 * 1000;
+const OCR_COOLDOWN_MS = (() => {
+  const raw = Number(process.env.OCR_COOLDOWN_MS || 15 * 1000);
+  if (!Number.isFinite(raw)) {
+    return 15 * 1000;
+  }
+  return Math.max(0, Math.min(10 * 60 * 1000, Math.round(raw)));
+})();
 const FACE_ANTIBOT_ENABLED = process.env.FACE_ANTIBOT_ENABLED === '1';
 const FACE_ANTIBOT_TEST_MODE = process.env.FACE_ANTIBOT_TEST_MODE !== '0';
 const FACE_CHALLENGE_TTL_MS = Number(process.env.FACE_ANTIBOT_CHALLENGE_TTL_MS || 2 * 60 * 1000);
@@ -866,6 +872,7 @@ function ocrCooldownMiddleware(req, res, next) {
     metricsState.cooldownHits += 1;
     markBotReason(res, 'cooldown');
     const waitSeconds = Math.ceil((OCR_COOLDOWN_MS - (now - lastAt)) / 1000);
+    res.setHeader('Retry-After', String(Math.max(1, waitSeconds)));
     res.status(429);
     return renderPage(req, res, {
       error: tLang(req, 'errors.cooldown', { seconds: waitSeconds }),

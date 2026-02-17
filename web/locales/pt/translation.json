@@ -75,12 +75,9 @@
     "paypalButton": "Pagar com PayPal",
     "metamaskButton": "Pagar com MetaMask (simulado)"
   },
-    "cameraReady": "Foto capturada. Toque em \"Processar OCR\".",
   "messages": {
     "paymentSuccess": "Pagamento simulado com {{method}} concluído. Documento completo desbloqueado."
   },
-    "uploading": "Enviando ao servidor...",
-    "uploadFailed": "Não foi possível enviar a imagem. Verifique sua conexão e tente novamente.",
   "mock": {
     "summaryLines": [
       "Resumo preliminar (incompleto):",
@@ -105,9 +102,13 @@
     "cameraNoSupport": "Seu navegador não consegue abrir a câmera pela web. Use o seletor de arquivos.",
     "cameraPermission": "Não foi possível acessar a câmera. Verifique as permissões do navegador.",
     "cameraCaptureFailed": "Não foi possível capturar a foto. Tente novamente.",
+    "cameraReady": "Foto capturada. Toque em \"Processar OCR\".",
     "preprocessing": "Pré-processando imagem no navegador...",
     "preprocessingReady": "Pré-processamento pronto. Enviando ao servidor...",
     "preprocessingError": "Erro no pré-processamento local.",
+    "uploading": "Enviando ao servidor...",
+    "uploadFailed": "Não foi possível enviar a imagem. Verifique sua conexão e tente novamente.",
+    "cooldownWait": "Aguarde {{seconds}} segundos antes de tentar novamente.",
     "likelyNoTextWarning": "A imagem parece não conter texto legível para OCR.",
     "likelyNoTextConfirm": "Isto parece uma foto sem texto (por exemplo, um rosto). Deseja continuar mesmo assim?",
     "likelyPrintedWarning": "A imagem parece conter texto digitado/digital, não manuscrito.",

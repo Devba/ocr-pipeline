@@ -66,6 +66,17 @@
         credentials: 'same-origin',
       });
 
+      if (!response.ok) {
+        if (response.status === 429) {
+          const retryAfter = Number(response.headers.get('Retry-After') || 0);
+          const seconds = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.round(retryAfter) : 15;
+          setStatus(t('cooldownWait', `Wait ${seconds}s before retrying.`).replace('{{seconds}}', String(seconds)), true);
+          return;
+        }
+        setStatus(t('uploadFailed', 'No se pudo enviar la imagen. Revisa tu conexión e inténtalo de nuevo.'), true);
+        return;
+      }
+
       const html = await response.text();
       document.open();
       document.write(html);

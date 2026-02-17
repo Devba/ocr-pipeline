@@ -75,12 +75,9 @@
     "paypalButton": "使用 PayPal 支付",
     "metamaskButton": "使用 MetaMask 支付（模拟）"
   },
-    "cameraReady": "已拍摄照片。请点击\"开始OCR\"。",
   "messages": {
     "paymentSuccess": "已完成 {{method}} 模拟支付。完整文档已解锁。"
   },
-    "uploading": "正在发送到服务器...",
-    "uploadFailed": "无法上传图片。请检查网络连接后重试。",
   "mock": {
     "summaryLines": [
       "初步摘要（不完整）：",
@@ -105,9 +102,13 @@
     "cameraNoSupport": "此浏览器无法从网页打开相机。请使用文件选择器。",
     "cameraPermission": "无法访问相机。请检查浏览器权限。",
     "cameraCaptureFailed": "无法拍摄照片。请重试。",
+    "cameraReady": "已拍摄照片。请点击\"开始OCR\"。",
     "preprocessing": "正在浏览器中预处理图片...",
     "preprocessingReady": "预处理完成，正在发送到服务器...",
     "preprocessingError": "本地预处理出错。",
+    "uploading": "正在发送到服务器...",
+    "uploadFailed": "无法上传图片。请检查网络连接后重试。",
+    "cooldownWait": "请等待 {{seconds}} 秒后再试。",
     "likelyNoTextWarning": "该图片似乎不包含可供 OCR 识别的文字。",
     "likelyNoTextConfirm": "这看起来像一张没有文字的照片（例如人脸）。仍要继续吗？",
     "likelyPrintedWarning": "该图片看起来更像机器打印/数字文本，而非手写。",
