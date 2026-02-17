@@ -20,6 +20,7 @@ const BASE_DIR = __dirname;
 const DATA_DIR = path.join(BASE_DIR, 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const WORK_DIR = path.join(DATA_DIR, 'work');
+const JOBS_DIR = path.join(DATA_DIR, 'jobs');
 const LOCALES_DIR = path.join(BASE_DIR, 'locales');
 
 const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.heic', '.heif']);
@@ -54,6 +55,7 @@ const DOC_AI_LOCATION = String(process.env.DOC_AI_LOCATION || 'us').trim();
 const DOC_AI_PROCESSOR_ID = String(process.env.DOC_AI_PROCESSOR_ID || '').trim();
 const DOC_AI_PROCESSOR_VERSION_ID = String(process.env.DOC_AI_PROCESSOR_VERSION_ID || '').trim();
 const DOC_AI_SUMMARY_CHARS = Number(process.env.DOC_AI_SUMMARY_CHARS || 1200);
+const DOC_AI_DEBUG_LOG = String(process.env.DOC_AI_DEBUG_LOG || '').trim() === '1';
 
 const DOC_AI_MIME_BY_EXT = {
   '.png': 'image/png',
@@ -90,6 +92,17 @@ const metricsState = {
   startedAt: Date.now(),
   totalRequests: 0,
   totalErrors: 0,
+  docAi: {
+    requests: 0,
+    pages: 0,
+    bytes: 0,
+    errors: 0,
+    lastAt: 0,
+    lastMs: 0,
+    lastPages: 0,
+    lastBytes: 0,
+    lastError: '',
+  },
   statusCounts: new Map(),
   methodCounts: new Map(),
   pathCounts: new Map(),
@@ -175,6 +188,19 @@ function buildMetricsSnapshot() {
     uptimeSeconds: Math.round((now - metricsState.startedAt) / 1000),
     totalRequests: metricsState.totalRequests,
     totalErrors: metricsState.totalErrors,
+    docAi: {
+      enabled: DOC_AI_ENABLED,
+      configured: isDocAiConfigured(),
+      requests: Number(metricsState.docAi.requests || 0),
+      pages: Number(metricsState.docAi.pages || 0),
+      bytes: Number(metricsState.docAi.bytes || 0),
+      errors: Number(metricsState.docAi.errors || 0),
+      lastAt: Number(metricsState.docAi.lastAt || 0),
+      lastMs: Number(metricsState.docAi.lastMs || 0),
+      lastPages: Number(metricsState.docAi.lastPages || 0),
+      lastBytes: Number(metricsState.docAi.lastBytes || 0),
+      lastError: String(metricsState.docAi.lastError || ''),
+    },
     uniqueVisitors24h: metricsState.uniqueVisitors.size,
     bots: {
       botUserAgentHits: metricsState.botUserAgentHits,
@@ -544,6 +570,131 @@ const upload = multer({
 async function ensureDirs() {
   await fs.mkdir(UPLOADS_DIR, { recursive: true });
   await fs.mkdir(WORK_DIR, { recursive: true });
+  await fs.mkdir(JOBS_DIR, { recursive: true });
+}
+
+async function pathExists(filePath) {
+  try {
+    await fs.stat(filePath);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function safeJobId(raw) {
+  const value = String(raw || '').trim();
+  if (!/^[a-zA-Z0-9_-]{6,80}$/.test(value)) {
+    return '';
+  }
+  return value;
+}
+
+function buildJobPaths(jobId, originalExt = '') {
+  const ext = originalExt && /^[.][a-z0-9]{1,8}$/i.test(originalExt) ? originalExt.toLowerCase() : '';
+  const jobDir = path.join(JOBS_DIR, jobId);
+  return {
+    jobDir,
+    originalPath: path.join(jobDir, `original${ext || '.bin'}`),
+    preprocessedPath: path.join(jobDir, 'preprocessed.png'),
+    summaryPath: path.join(jobDir, 'summary.txt'),
+    fullPath: path.join(jobDir, 'full.txt'),
+    metaPath: path.join(jobDir, 'meta.json'),
+  };
+}
+
+async function persistJob({
+  jobId,
+  uploadedFile,
+  preprocessedPath,
+  summaryText,
+  fullText,
+  language,
+  profile,
+  psm,
+  engine,
+  clientPreprocessed,
+  ipHash,
+}) {
+  const safeId = safeJobId(jobId);
+  if (!safeId) {
+    return;
+  }
+
+  const originalExt = path.extname(String(uploadedFile?.filename || uploadedFile?.originalname || '')).toLowerCase();
+  const paths = buildJobPaths(safeId, originalExt);
+  await fs.mkdir(paths.jobDir, { recursive: true });
+
+  if (uploadedFile?.path && await pathExists(uploadedFile.path)) {
+    try {
+      await fs.rename(uploadedFile.path, paths.originalPath);
+    } catch (_error) {
+      await fs.copyFile(uploadedFile.path, paths.originalPath);
+    }
+  }
+
+  if (preprocessedPath && await pathExists(preprocessedPath)) {
+    try {
+      await fs.rename(preprocessedPath, paths.preprocessedPath);
+    } catch (_error) {
+      await fs.copyFile(preprocessedPath, paths.preprocessedPath);
+    }
+  }
+
+  await fs.writeFile(paths.summaryPath, String(summaryText || '').trimEnd() + '\n', 'utf8');
+  await fs.writeFile(paths.fullPath, String(fullText || '').trimEnd() + '\n', 'utf8');
+
+  const meta = {
+    id: safeId,
+    createdAt: new Date().toISOString(),
+    engine: String(engine || 'mock'),
+    language: String(language || ''),
+    profile: String(profile || ''),
+    psm: String(psm || ''),
+    clientPreprocessed: Boolean(clientPreprocessed),
+    ip: String(ipHash || ''),
+    upload: uploadedFile ? {
+      originalName: String(uploadedFile.originalname || ''),
+      mimeType: String(uploadedFile.mimetype || ''),
+      size: Number(uploadedFile.size || 0),
+      storedAs: path.basename(paths.originalPath),
+    } : null,
+    files: {
+      original: path.basename(paths.originalPath),
+      preprocessed: await pathExists(paths.preprocessedPath) ? path.basename(paths.preprocessedPath) : null,
+      summary: path.basename(paths.summaryPath),
+      full: path.basename(paths.fullPath),
+      meta: path.basename(paths.metaPath),
+    },
+  };
+
+  await fs.writeFile(paths.metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf8');
+}
+
+async function loadJobFromDisk(jobId) {
+  const safeId = safeJobId(jobId);
+  if (!safeId) {
+    return null;
+  }
+
+  const paths = buildJobPaths(safeId);
+  if (!await pathExists(paths.metaPath)) {
+    return null;
+  }
+
+  try {
+    const metaRaw = await fs.readFile(paths.metaPath, 'utf8');
+    const meta = JSON.parse(metaRaw);
+    const summaryText = await fs.readFile(paths.summaryPath, 'utf8').catch(() => '');
+    const fullText = await fs.readFile(paths.fullPath, 'utf8').catch(() => '');
+    return {
+      summaryText: String(summaryText || '').trim(),
+      fullText: String(fullText || '').trim(),
+      language: String(meta?.language || ''),
+    };
+  } catch (_error) {
+    return null;
+  }
 }
 
 async function preprocessImage(inputPath, outputPath, profile) {
@@ -599,7 +750,8 @@ function buildDocAiProcessorName(client) {
   return client.processorPath(DOC_AI_PROJECT_ID, DOC_AI_LOCATION, DOC_AI_PROCESSOR_ID);
 }
 
-async function runDocAiOcr(filePath) {
+async function runDocAiOcr(filePath, context = {}) {
+  const startedAt = Date.now();
   const client = new docAiV1.DocumentProcessorServiceClient({
     apiEndpoint: `${DOC_AI_LOCATION}-documentai.googleapis.com`,
   });
@@ -608,13 +760,38 @@ async function runDocAiOcr(filePath) {
   const content = await fs.readFile(filePath);
   const mimeType = getDocAiMimeType(filePath);
 
-  const [result] = await client.processDocument({
-    name,
-    rawDocument: {
-      content,
-      mimeType,
-    },
-  });
+  metricsState.docAi.requests += 1;
+  metricsState.docAi.bytes += content.length;
+  metricsState.docAi.lastAt = Date.now();
+  metricsState.docAi.lastBytes = content.length;
+
+  let result;
+  try {
+    [result] = await client.processDocument({
+      name,
+      rawDocument: {
+        content,
+        mimeType,
+      },
+    });
+  } catch (error) {
+    metricsState.docAi.errors += 1;
+    metricsState.docAi.lastError = String(error?.message || 'DOC_AI_ERROR').slice(0, 240);
+    throw error;
+  } finally {
+    metricsState.docAi.lastMs = Date.now() - startedAt;
+  }
+
+  const pagesLen = Array.isArray(result?.document?.pages) ? result.document.pages.length : 0;
+  const pages = pagesLen > 0 ? pagesLen : (mimeType.startsWith('image/') ? 1 : 0);
+  metricsState.docAi.pages += pages;
+  metricsState.docAi.lastPages = pages;
+
+  if (DOC_AI_DEBUG_LOG) {
+    const jobId = context?.jobId ? String(context.jobId) : '';
+    const textChars = String(result?.document?.text || '').length;
+    console.log(`[docai] job=${jobId || 'n/a'} mime=${mimeType} bytes=${content.length} pages=${pages} chars=${textChars} ms=${metricsState.docAi.lastMs}`);
+  }
 
   const text = String(result?.document?.text || '').trim();
   return text;
@@ -950,8 +1127,9 @@ app.post('/', ocrLimiter, requestTimeoutMiddleware(45 * 1000), upload.single('im
     let summaryText = '';
     let fullText = '';
 
-    if (isDocAiConfigured()) {
-      fullText = await runDocAiOcr(ocrInputPath);
+    const engine = isDocAiConfigured() ? 'docai' : 'mock';
+    if (engine === 'docai') {
+      fullText = await runDocAiOcr(ocrInputPath, { jobId });
       summaryText = buildSummaryFromFullText(fullText);
     } else {
       summaryText = buildMockSummary(selectedLanguage);
@@ -959,6 +1137,21 @@ app.post('/', ocrLimiter, requestTimeoutMiddleware(45 * 1000), upload.single('im
     }
 
     mockDocuments.set(jobId, { summaryText, fullText, language: selectedLanguage });
+
+    const visitorKey = hashIpForMetrics(getClientIp(req));
+    await persistJob({
+      jobId,
+      uploadedFile: req.file,
+      preprocessedPath: ocrInputPath === preprocessedPath ? preprocessedPath : null,
+      summaryText,
+      fullText,
+      language: selectedLanguage,
+      profile: selectedProfile,
+      psm: selectedPsm,
+      engine,
+      clientPreprocessed,
+      ipHash: visitorKey,
+    });
 
     return renderPage(req, res, {
       summaryText,
@@ -991,13 +1184,47 @@ app.post('/unlock', (req, res) => {
     });
   }
 
-  const doc = mockDocuments.get(documentId);
-  if (!doc) {
-    res.status(404);
-    return renderPage(req, res, {
-      error: i18next.t('errors.documentNotFound', { lng: selectedLanguage }),
-      selectedLanguage,
+  const finishUnlock = (doc) => {
+    const language = doc.language || selectedLanguage;
+    const methodLabel = paymentMethod === 'paypal'
+      ? i18next.t('payment.paypalLabel', { lng: language })
+      : i18next.t('payment.metamaskLabel', { lng: language });
+    const paymentMessage = i18next.t('messages.paymentSuccess', {
+      lng: language,
+      method: methodLabel,
     });
+
+    return renderPage(req, res, {
+      summaryText: doc.summaryText,
+      fullText: doc.fullText,
+      documentId,
+      selectedLanguage: language,
+      paymentMessage,
+    });
+  };
+
+  let doc = mockDocuments.get(documentId);
+  if (!doc) {
+    // Permite desbloquear tras reinicios leyendo resultado guardado en disco.
+    // Nota: endpoint síncrono; usamos IIFE async y devolvemos.
+    (async () => {
+      const fromDisk = await loadJobFromDisk(documentId);
+      if (!fromDisk) {
+        res.status(404);
+        return renderPage(req, res, {
+          error: i18next.t('errors.documentNotFound', { lng: selectedLanguage }),
+          selectedLanguage,
+        });
+      }
+      doc = {
+        summaryText: fromDisk.summaryText,
+        fullText: fromDisk.fullText,
+        language: fromDisk.language || selectedLanguage,
+      };
+      mockDocuments.set(documentId, doc);
+      return finishUnlock(doc);
+    })();
+    return;
   }
 
   if (paymentMethod === 'paypal' && PAYPAL_ENABLED) {
@@ -1014,22 +1241,7 @@ app.post('/unlock', (req, res) => {
     paypalOrders.set(orderId, local);
   }
 
-  const language = doc.language || selectedLanguage;
-  const methodLabel = paymentMethod === 'paypal'
-    ? i18next.t('payment.paypalLabel', { lng: language })
-    : i18next.t('payment.metamaskLabel', { lng: language });
-  const paymentMessage = i18next.t('messages.paymentSuccess', {
-    lng: language,
-    method: methodLabel,
-  });
-
-  return renderPage(req, res, {
-    summaryText: doc.summaryText,
-    fullText: doc.fullText,
-    documentId,
-    selectedLanguage: language,
-    paymentMessage,
-  });
+  return finishUnlock(doc);
 });
 
 app.use((error, req, res, _next) => {

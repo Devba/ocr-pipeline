@@ -8,6 +8,7 @@ web/node_modules/
 
 web/data/uploads/
 web/data/work/
+web/data/jobs/
 
 .env
 .env.*

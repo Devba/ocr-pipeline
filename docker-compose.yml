@@ -3,6 +3,8 @@ services:
     build:
       context: ./web
     restart: unless-stopped
+    volumes:
+      - app_data:/app/data
     environment:
       PORT: "8000"
       ADMIN_STATS_TOKEN: "${ADMIN_STATS_TOKEN:-}"
@@ -64,3 +66,6 @@ services:
           certbot renew --webroot -w /var/www/certbot --quiet;
           sleep 12h & wait $${!};
         done
+
+volumes:
+  app_data:
